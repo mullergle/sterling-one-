@@ -1660,16 +1660,18 @@ app.get(
 
 // =====================================================
 // ADMIN - USERS
+// Excludes administrator accounts
 // =====================================================
 
 app.get(
   "/api/admin/users",
   authenticateAdmin,
   async (req, res) => {
+
     try {
 
       // -------------------------------------------------
-      // Get all profiles
+      // Get ONLY normal users
       // -------------------------------------------------
 
       const {
@@ -1678,11 +1680,14 @@ app.get(
       } = await supabase
         .from("profiles")
         .select("*")
+        .eq("is_admin", false)
         .order("created_at", {
           ascending: false
         });
 
+
       if (profilesError) {
+
         console.error(
           "ADMIN USERS - PROFILES ERROR:",
           profilesError
@@ -1692,11 +1697,12 @@ app.get(
           success: false,
           message: profilesError.message
         });
+
       }
 
 
       // -------------------------------------------------
-      // Get all accounts
+      // Get accounts
       // -------------------------------------------------
 
       const {
@@ -1706,7 +1712,9 @@ app.get(
         .from("accounts")
         .select("*");
 
+
       if (accountsError) {
+
         console.error(
           "ADMIN USERS - ACCOUNTS ERROR:",
           accountsError
@@ -1716,11 +1724,12 @@ app.get(
           success: false,
           message: accountsError.message
         });
+
       }
 
 
       // -------------------------------------------------
-      // Get all account balances
+      // Get account balances
       // -------------------------------------------------
 
       const {
@@ -1730,7 +1739,9 @@ app.get(
         .from("account_balances")
         .select("*");
 
+
       if (balancesError) {
+
         console.error(
           "ADMIN USERS - BALANCES ERROR:",
           balancesError
@@ -1740,12 +1751,12 @@ app.get(
           success: false,
           message: balancesError.message
         });
+
       }
 
 
       // -------------------------------------------------
-      // Get Supabase Auth users
-      // This gives us the email addresses.
+      // Get Auth users for email addresses
       // -------------------------------------------------
 
       const {
@@ -1756,9 +1767,11 @@ app.get(
         perPage: 1000
       });
 
+
       if (authError) {
+
         console.error(
-          "ADMIN USERS - AUTH USERS ERROR:",
+          "ADMIN USERS - AUTH ERROR:",
           authError
         );
 
@@ -1766,112 +1779,154 @@ app.get(
           success: false,
           message: authError.message
         });
+
       }
 
 
       // -------------------------------------------------
-      // Create quick lookup maps
+      // Create lookup maps
       // -------------------------------------------------
 
       const accountMap = new Map();
 
       for (const account of accounts || []) {
-        accountMap.set(account.user_id, account);
+
+        accountMap.set(
+          account.user_id,
+          account
+        );
+
       }
 
 
       const balanceMap = new Map();
 
       for (const balance of balances || []) {
-        balanceMap.set(balance.account_id, balance);
+
+        balanceMap.set(
+          balance.account_id,
+          balance
+        );
+
       }
 
 
       const authUserMap = new Map();
 
       for (const authUser of authData.users || []) {
-        authUserMap.set(authUser.id, authUser);
+
+        authUserMap.set(
+          authUser.id,
+          authUser
+        );
+
       }
 
 
       // -------------------------------------------------
-      // Build admin user list
+      // Build normal-user list
       // -------------------------------------------------
 
-      const users = (profiles || []).map(profile => {
+      const users =
+        (profiles || []).map(profile => {
 
-        const account = accountMap.get(profile.id);
-
-        const balance = account
-          ? balanceMap.get(account.id)
-          : null;
-
-        const authUser = authUserMap.get(profile.id);
+          const account =
+            accountMap.get(profile.id);
 
 
-        // Build full name
-        const fullName = [
-          profile.first_name,
-          profile.surname
-        ]
+          const balance =
+            account
+              ? balanceMap.get(account.id)
+              : null;
+
+
+          const authUser =
+            authUserMap.get(profile.id);
+
+
+          const fullName = [
+
+            profile.first_name,
+
+            profile.surname
+
+          ]
           .filter(Boolean)
           .join(" ")
           .trim();
 
 
-        return {
+          return {
 
-          id: profile.id,
+            id:
+              profile.id,
 
-          full_name:
-            fullName ||
-            profile.full_name ||
-            "Unnamed User",
+            full_name:
+              fullName ||
+              "Unnamed User",
 
-          email:
-            authUser?.email ||
-            profile.email ||
-            "No email",
+            email:
+              authUser?.email ||
+              profile.email ||
+              "No email",
 
-          balance:
-            balance?.available_balance ??
-            0,
+            balance:
+              balance?.available_balance ??
+              0,
 
-          is_suspended:
-            profile.is_suspended === true,
+            is_suspended:
+              profile.is_suspended === true,
 
-          account: account
-            ? {
-                id: account.id,
-                account_number: account.account_number,
-                account_type: account.account_type,
-                currency: account.currency,
-                status: account.status
-              }
-            : null,
+            account:
+              account
+                ? {
 
-          account_balance: balance
-            ? {
-                available_balance:
-                  balance.available_balance,
+                    id:
+                      account.id,
 
-                ledger_balance:
-                  balance.ledger_balance
-              }
-            : null
+                    account_number:
+                      account.account_number,
 
-        };
+                    account_type:
+                      account.account_type,
 
-      });
+                    currency:
+                      account.currency,
+
+                    status:
+                      account.status
+
+                  }
+                : null,
+
+            account_balance:
+              balance
+                ? {
+
+                    available_balance:
+                      balance.available_balance,
+
+                    ledger_balance:
+                      balance.ledger_balance
+
+                  }
+                : null
+
+          };
+
+        });
 
 
       // -------------------------------------------------
-      // Return users
+      // Return ONLY normal users
       // -------------------------------------------------
 
       res.json({
+
         success: true,
+
         users
+
       });
 
 
@@ -1883,11 +1938,16 @@ app.get(
       );
 
       res.status(500).json({
+
         success: false,
-        message: "Unable to load users"
+
+        message:
+          "Unable to load users"
+
       });
 
     }
+
   }
 );
 
