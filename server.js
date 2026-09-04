@@ -490,6 +490,10 @@ app.post("/api/auth/login", async (req, res) => {
       });
     }
 
+    // -----------------------------
+    // Authenticate with Supabase
+    // -----------------------------
+
     const {
       data,
       error
@@ -498,22 +502,73 @@ app.post("/api/auth/login", async (req, res) => {
       password
     });
 
-    if (error) {
+    if (error || !data.user) {
       return res.status(401).json({
         success: false,
         message: "Invalid email or password"
       });
     }
 
+    const userId = data.user.id;
+
+
+    // -----------------------------
+    // Get user profile + admin status
+    // -----------------------------
+
+    const {
+      data: profile,
+      error: profileError
+    } = await supabase
+      .from("profiles")
+      .select("id, first_name, surname, is_admin")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (profileError) {
+      console.error(
+        "LOGIN PROFILE ERROR:",
+        profileError
+      );
+
+      return res.status(500).json({
+        success: false,
+        message: "Unable to verify account"
+      });
+    }
+
+
+    // -----------------------------
+    // Determine admin status
+    // -----------------------------
+
+    const isAdmin =
+      profile &&
+      profile.is_admin === true;
+
+
+    // -----------------------------
+    // Return login result
+    // -----------------------------
+
     res.json({
       success: true,
       message: "Login successful",
+
       session: data.session,
-      user: data.user
+
+      user: data.user,
+
+      profile: profile || null,
+
+      is_admin: isAdmin
     });
 
   } catch (error) {
-    console.error(error);
+    console.error(
+      "Login error:",
+      error
+    );
 
     res.status(500).json({
       success: false,
@@ -521,7 +576,6 @@ app.post("/api/auth/login", async (req, res) => {
     });
   }
 });
-
 
 // =====================================================
 // GET CURRENT USER
