@@ -6,6 +6,11 @@ const crypto = require("crypto");
 
 const supabase = require("./supabase");
 
+console.log(
+  "SERVICE ROLE KEY LOADED:",
+  !!process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+
 const app = express();
 
 app.use(cors());
