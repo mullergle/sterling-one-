@@ -149,28 +149,42 @@ async function authenticateAdmin(req, res, next) {
       });
     }
 
-    const token = authHeader.replace("Bearer ", "").trim();
+    const token = authHeader
+      .replace("Bearer ", "")
+      .trim();
 
     const {
       data: { user },
-      error
+      error: authError
     } = await supabase.auth.getUser(token);
 
-    if (error || !user) {
+    if (authError || !user) {
       return res.status(401).json({
         success: false,
         message: "Invalid or expired session"
       });
     }
 
-    const { data: admin, error: adminError } = await supabase
-      .from("admin_profiles")
-      .select("*")
+    // Check the user's admin status
+    const {
+      data: profile,
+      error: profileError
+    } = await supabase
+      .from("profiles")
+      .select("id, is_admin")
       .eq("id", user.id)
-      .eq("status", "active")
       .maybeSingle();
 
-    if (adminError || !admin) {
+    if (profileError) {
+      console.error("ADMIN PROFILE CHECK ERROR:", profileError);
+
+      return res.status(500).json({
+        success: false,
+        message: "Unable to verify administrator access"
+      });
+    }
+
+    if (!profile || profile.is_admin !== true) {
       return res.status(403).json({
         success: false,
         message: "Administrator access required"
@@ -178,20 +192,19 @@ async function authenticateAdmin(req, res, next) {
     }
 
     req.user = user;
-    req.admin = admin;
+    req.profile = profile;
 
     next();
 
   } catch (error) {
-    console.error(error);
+    console.error("Admin authentication error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Admin authentication failed"
     });
   }
 }
-
 
 // =====================================================
 // REGISTER
