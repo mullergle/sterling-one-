@@ -587,42 +587,257 @@ app.post("/api/auth/login", async (req, res) => {
 // =====================================================
 
 app.get("/api/auth/me", authenticate, async (req, res) => {
+
   try {
+
     const userId = req.user.id;
 
-    const { data: profile } = await supabase
+
+    // -------------------------------------------------
+    // Get profile
+    // -------------------------------------------------
+
+    const {
+      data: profile,
+      error: profileError
+    } = await supabase
       .from("profiles")
       .select("*")
       .eq("id", userId)
       .maybeSingle();
 
-    const { data: address } = await supabase
+
+    if (profileError) {
+
+      console.error(
+        "AUTH ME PROFILE ERROR:",
+        profileError
+      );
+
+      return res.status(500).json({
+        success: false,
+        message: profileError.message
+      });
+
+    }
+
+
+    // -------------------------------------------------
+    // Get address
+    // -------------------------------------------------
+
+    const {
+      data: address,
+      error: addressError
+    } = await supabase
       .from("customer_addresses")
       .select("*")
       .eq("user_id", userId)
       .maybeSingle();
 
-    const { data: accounts } = await supabase
+
+    if (addressError) {
+
+      console.error(
+        "AUTH ME ADDRESS ERROR:",
+        addressError
+      );
+
+    }
+
+
+    // -------------------------------------------------
+    // Get accounts + LIVE balances
+    // -------------------------------------------------
+
+    const {
+      data: accounts,
+      error: accountsError
+    } = await supabase
       .from("accounts")
-      .select("*")
+      .select(`
+        *,
+        account_balances (
+          available_balance,
+          ledger_balance,
+          updated_at
+        )
+      `)
       .eq("user_id", userId);
 
+
+    if (accountsError) {
+
+      console.error(
+        "AUTH ME ACCOUNTS ERROR:",
+        accountsError
+      );
+
+      return res.status(500).json({
+        success: false,
+        message: accountsError.message
+      });
+
+    }
+
+
+    // -------------------------------------------------
+    // Find checking account
+    // -------------------------------------------------
+
+    const checkingAccount =
+      (accounts || []).find(
+        account =>
+          String(
+            account.account_type || ""
+          ).toLowerCase() === "checking"
+      );
+
+
+    // -------------------------------------------------
+    // Find savings account
+    // -------------------------------------------------
+
+    const savingsAccount =
+      (accounts || []).find(
+        account => {
+
+          const type =
+            String(
+              account.account_type || ""
+            ).toLowerCase();
+
+          return (
+            type === "savings" ||
+            type === "saving"
+          );
+
+        }
+      );
+
+
+    // -------------------------------------------------
+    // Read LIVE checking balance
+    // -------------------------------------------------
+
+    const checkingBalance =
+      Number(
+        checkingAccount
+          ?.account_balances?.[0]
+          ?.available_balance ?? 0
+      );
+
+
+    // -------------------------------------------------
+    // Read LIVE savings balance
+    // -------------------------------------------------
+
+    const savingsBalance =
+      Number(
+        savingsAccount
+          ?.account_balances?.[0]
+          ?.available_balance ?? 0
+      );
+
+
+    // -------------------------------------------------
+    // Get LIVE card balance
+    // -------------------------------------------------
+
+    const {
+      data: cards,
+      error: cardsError
+    } = await supabase
+      .from("cards")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", {
+        ascending: false
+      });
+
+
+    if (cardsError) {
+
+      console.error(
+        "AUTH ME CARDS ERROR:",
+        cardsError
+      );
+
+      return res.status(500).json({
+        success: false,
+        message: cardsError.message
+      });
+
+    }
+
+
+    const card =
+      (cards || [])[0] || null;
+
+
+    const cardBalance =
+      Number(
+        card?.balance ?? 0
+      );
+
+
+    // -------------------------------------------------
+    // Return fresh account information
+    // -------------------------------------------------
+
     res.json({
+
       success: true,
-      user: req.user,
-      profile,
-      address,
-      accounts
+
+      user:
+        req.user,
+
+      profile:
+        profile || null,
+
+      address:
+        address || null,
+
+      accounts:
+        accounts || [],
+
+      cards:
+        cards || [],
+
+      balances: {
+
+        checking:
+          checkingBalance,
+
+        savings:
+          savingsBalance,
+
+        card:
+          cardBalance
+
+      }
+
     });
+
 
   } catch (error) {
-    console.error(error);
+
+    console.error(
+      "AUTH ME ERROR:",
+      error
+    );
 
     res.status(500).json({
+
       success: false,
-      message: "Unable to load user"
+
+      message:
+        "Unable to load user"
+
     });
+
   }
+
 });
 
 
