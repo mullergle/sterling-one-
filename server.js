@@ -1661,54 +1661,238 @@ app.get(
 // ADMIN - USERS
 // =====================================================
 
+// =====================================================
+// ADMIN - USERS
+// =====================================================
+
 app.get(
   "/api/admin/users",
   authenticateAdmin,
   async (req, res) => {
     try {
-      const { data, error } = await supabase
+
+      // -------------------------------------------------
+      // Get all profiles
+      // -------------------------------------------------
+
+      const {
+        data: profiles,
+        error: profilesError
+      } = await supabase
         .from("profiles")
-        .select(`
-          *,
-          accounts (
-            id,
-            account_number,
-            account_type,
-            currency,
-            status,
-            account_balances (
-              available_balance,
-              ledger_balance
-            )
-          )
-        `)
+        .select("*")
         .order("created_at", {
           ascending: false
         });
 
-      if (error) {
+      if (profilesError) {
+        console.error(
+          "ADMIN USERS - PROFILES ERROR:",
+          profilesError
+        );
+
         return res.status(500).json({
           success: false,
-          message: error.message
+          message: profilesError.message
         });
       }
 
-      res.json({
-        success: true,
-        users: data
+
+      // -------------------------------------------------
+      // Get all accounts
+      // -------------------------------------------------
+
+      const {
+        data: accounts,
+        error: accountsError
+      } = await supabase
+        .from("accounts")
+        .select("*");
+
+      if (accountsError) {
+        console.error(
+          "ADMIN USERS - ACCOUNTS ERROR:",
+          accountsError
+        );
+
+        return res.status(500).json({
+          success: false,
+          message: accountsError.message
+        });
+      }
+
+
+      // -------------------------------------------------
+      // Get all account balances
+      // -------------------------------------------------
+
+      const {
+        data: balances,
+        error: balancesError
+      } = await supabase
+        .from("account_balances")
+        .select("*");
+
+      if (balancesError) {
+        console.error(
+          "ADMIN USERS - BALANCES ERROR:",
+          balancesError
+        );
+
+        return res.status(500).json({
+          success: false,
+          message: balancesError.message
+        });
+      }
+
+
+      // -------------------------------------------------
+      // Get Supabase Auth users
+      // This gives us the email addresses.
+      // -------------------------------------------------
+
+      const {
+        data: authData,
+        error: authError
+      } = await supabase.auth.admin.listUsers({
+        page: 1,
+        perPage: 1000
       });
 
+      if (authError) {
+        console.error(
+          "ADMIN USERS - AUTH USERS ERROR:",
+          authError
+        );
+
+        return res.status(500).json({
+          success: false,
+          message: authError.message
+        });
+      }
+
+
+      // -------------------------------------------------
+      // Create quick lookup maps
+      // -------------------------------------------------
+
+      const accountMap = new Map();
+
+      for (const account of accounts || []) {
+        accountMap.set(account.user_id, account);
+      }
+
+
+      const balanceMap = new Map();
+
+      for (const balance of balances || []) {
+        balanceMap.set(balance.account_id, balance);
+      }
+
+
+      const authUserMap = new Map();
+
+      for (const authUser of authData.users || []) {
+        authUserMap.set(authUser.id, authUser);
+      }
+
+
+      // -------------------------------------------------
+      // Build admin user list
+      // -------------------------------------------------
+
+      const users = (profiles || []).map(profile => {
+
+        const account = accountMap.get(profile.id);
+
+        const balance = account
+          ? balanceMap.get(account.id)
+          : null;
+
+        const authUser = authUserMap.get(profile.id);
+
+
+        // Build full name
+        const fullName = [
+          profile.first_name,
+          profile.surname
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .trim();
+
+
+        return {
+
+          id: profile.id,
+
+          full_name:
+            fullName ||
+            profile.full_name ||
+            "Unnamed User",
+
+          email:
+            authUser?.email ||
+            profile.email ||
+            "No email",
+
+          balance:
+            balance?.available_balance ??
+            0,
+
+          is_suspended:
+            profile.is_suspended === true,
+
+          account: account
+            ? {
+                id: account.id,
+                account_number: account.account_number,
+                account_type: account.account_type,
+                currency: account.currency,
+                status: account.status
+              }
+            : null,
+
+          account_balance: balance
+            ? {
+                available_balance:
+                  balance.available_balance,
+
+                ledger_balance:
+                  balance.ledger_balance
+              }
+            : null
+
+        };
+
+      });
+
+
+      // -------------------------------------------------
+      // Return users
+      // -------------------------------------------------
+
+      res.json({
+        success: true,
+        users
+      });
+
+
     } catch (error) {
-      console.error(error);
+
+      console.error(
+        "ADMIN USERS ERROR:",
+        error
+      );
 
       res.status(500).json({
         success: false,
         message: "Unable to load users"
       });
+
     }
   }
 );
-
 
 // =====================================================
 // ADMIN - USER DETAILS
