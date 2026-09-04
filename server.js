@@ -202,7 +202,6 @@ app.post("/api/auth/register", async (req, res) => {
     const {
     fname,
     sname,
-    lname,
     email,
     ssn,
     phone,
@@ -222,7 +221,6 @@ app.post("/api/auth/register", async (req, res) => {
     if (
       !fname ||
       !sname ||
-      !lname ||
       !email ||
       !phone ||
       !pass ||
@@ -308,7 +306,6 @@ app.post("/api/auth/register", async (req, res) => {
         id: userId,
         first_name: fname.trim(),
         surname: sname.trim(),
-        last_name: lname.trim(),
         phone: phone.trim(),
         ssn: ssn.trim()
       });
