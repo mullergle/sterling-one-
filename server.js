@@ -200,20 +200,20 @@ async function authenticateAdmin(req, res, next) {
 app.post("/api/auth/register", async (req, res) => {
   try {
     const {
-      fname,
-      sname,
-      lname,
-      email,
-      phone,
-      pass,
-      cpass,
-      country,
-      state,
-      city,
-      address,
-      terms
-    } = req.body;
-
+    fname,
+    sname,
+    lname,
+    email,
+    ssn,
+    phone,
+    pass,
+    cpass,
+    country,
+    state,
+    city,
+    address,
+    terms
+} = req.body;
 
     // -----------------------------
     // Validate fields
