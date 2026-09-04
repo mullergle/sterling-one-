@@ -381,14 +381,16 @@ app.post("/api/auth/register", async (req, res) => {
     // -----------------------------
 
     const { error: profileError } = await supabase
-      .from("profiles")
-      .insert({
-        id: userId,
-        first_name: fname.trim(),
-        surname: sname.trim(),
-        phone: phone.trim(),
-        ssn: ssn.trim()
-      });
+  .from("profiles")
+  .insert({
+    id: userId,
+    first_name: fname.trim(),
+    surname: sname.trim(),
+    phone: phone.trim(),
+    ssn: ssn.trim(),
+    is_admin: false,
+    is_suspended: false
+  });
 
      if (profileError) {
   console.error("PROFILE INSERT ERROR:", profileError);
@@ -1934,299 +1936,182 @@ app.get(
 );
 
 
-
-// =====================================================
-// ADMIN - USERS
-// Excludes administrator accounts
-// =====================================================
-
-app.get(
-  "/api/admin/users",
-  authenticateAdmin,
-  async (req, res) => {
-
-    try {
-
-      // -------------------------------------------------
-      // Get ONLY normal users
-      // -------------------------------------------------
-
-      const {
-        data: profiles,
-        error: profilesError
-      } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("is_admin", false)
-        .order("created_at", {
-          ascending: false
-        });
-
-
-      if (profilesError) {
-
-        console.error(
-          "ADMIN USERS - PROFILES ERROR:",
-          profilesError
-        );
-
-        return res.status(500).json({
-          success: false,
-          message: profilesError.message
-        });
-
-      }
-
-
-      // -------------------------------------------------
-      // Get accounts
-      // -------------------------------------------------
-
-      const {
-        data: accounts,
-        error: accountsError
-      } = await supabase
-        .from("accounts")
-        .select("*");
-
-
-      if (accountsError) {
-
-        console.error(
-          "ADMIN USERS - ACCOUNTS ERROR:",
-          accountsError
-        );
-
-        return res.status(500).json({
-          success: false,
-          message: accountsError.message
-        });
-
-      }
-
-
-      // -------------------------------------------------
-      // Get account balances
-      // -------------------------------------------------
-
-      const {
-        data: balances,
-        error: balancesError
-      } = await supabase
-        .from("account_balances")
-        .select("*");
-
-
-      if (balancesError) {
-
-        console.error(
-          "ADMIN USERS - BALANCES ERROR:",
-          balancesError
-        );
-
-        return res.status(500).json({
-          success: false,
-          message: balancesError.message
-        });
-
-      }
-
-
-      // -------------------------------------------------
-      // Get Auth users for email addresses
-      // -------------------------------------------------
-
-      const {
-        data: authData,
-        error: authError
-      } = await supabase.auth.admin.listUsers({
-        page: 1,
-        perPage: 1000
-      });
-
-
-      if (authError) {
-
-        console.error(
-          "ADMIN USERS - AUTH ERROR:",
-          authError
-        );
-
-        return res.status(500).json({
-          success: false,
-          message: authError.message
-        });
-
-      }
-
-
-      // -------------------------------------------------
-      // Create lookup maps
-      // -------------------------------------------------
-
-      const accountMap = new Map();
-
-      for (const account of accounts || []) {
-
-        accountMap.set(
-          account.user_id,
-          account
-        );
-
-      }
-
-
-      const balanceMap = new Map();
-
-      for (const balance of balances || []) {
-
-        balanceMap.set(
-          balance.account_id,
-          balance
-        );
-
-      }
-
-
-      const authUserMap = new Map();
-
-      for (const authUser of authData.users || []) {
-
-        authUserMap.set(
-          authUser.id,
-          authUser
-        );
-
-      }
-
-
-      // -------------------------------------------------
-      // Build normal-user list
-      // -------------------------------------------------
-
-      const users =
-        (profiles || []).map(profile => {
-
-          const account =
-            accountMap.get(profile.id);
-
-
-          const balance =
-            account
-              ? balanceMap.get(account.id)
-              : null;
-
-
-          const authUser =
-            authUserMap.get(profile.id);
-
-
-          const fullName = [
-
-            profile.first_name,
-
-            profile.surname
-
-          ]
-          .filter(Boolean)
-          .join(" ")
-          .trim();
-
-
-          return {
-
-            id:
-              profile.id,
-
-            full_name:
-              fullName ||
-              "Unnamed User",
-
-            email:
-              authUser?.email ||
-              profile.email ||
-              "No email",
-
-            balance:
-              balance?.available_balance ??
-              0,
-
-            is_suspended:
-              profile.is_suspended === true,
-
-            account:
-              account
-                ? {
-
-                    id:
-                      account.id,
-
-                    account_number:
-                      account.account_number,
-
-                    account_type:
-                      account.account_type,
-
-                    currency:
-                      account.currency,
-
-                    status:
-                      account.status
-
-                  }
-                : null,
-
-            account_balance:
-              balance
-                ? {
-
-                    available_balance:
-                      balance.available_balance,
-
-                    ledger_balance:
-                      balance.ledger_balance
-
-                  }
-                : null
-
-          };
-
-        });
-
-
-      // -------------------------------------------------
-      // Return ONLY normal users
-      // -------------------------------------------------
-
-      res.json({
-
-        success: true,
-
-        users
-
-      });
-
-
-    } catch (error) {
-
-      console.error(
-        "ADMIN USERS ERROR:",
-        error
-      );
-
-      res.status(500).json({
-
+// ===============================
+// GET ALL CUSTOMERS / USERS
+// ===============================
+app.get("/api/admin/users", authenticateAdmin, async (req, res) => {
+  try {
+    // 1. Get ALL profiles first.
+    // Do NOT use .eq("is_admin", false) here because
+    // existing users may have is_admin = NULL.
+    const { data: profiles, error: profilesError } = await supabase
+      .from("profiles")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (profilesError) {
+      console.error("Profiles query error:", profilesError);
+
+      return res.status(500).json({
         success: false,
-
-        message:
-          "Unable to load users"
-
+        message: "Unable to load user profiles.",
+        error: profilesError.message
       });
-
     }
 
+    // 2. Remove administrator profiles in JavaScript.
+    const customerProfiles = (profiles || []).filter((profile) => {
+      const isAdmin =
+        profile.is_admin === true ||
+        profile.is_admin === "true" ||
+        profile.is_admin === 1 ||
+        profile.is_admin === "1";
+
+      return !isAdmin;
+    });
+
+    // 3. Get all accounts
+    const { data: accounts, error: accountsError } = await supabase
+      .from("accounts")
+      .select("*");
+
+    if (accountsError) {
+      console.error("Accounts query error:", accountsError);
+
+      return res.status(500).json({
+        success: false,
+        message: "Unable to load accounts.",
+        error: accountsError.message
+      });
+    }
+
+    // 4. Get all account balances
+    const { data: accountBalances, error: balancesError } = await supabase
+      .from("account_balances")
+      .select("*");
+
+    if (balancesError) {
+      console.error("Account balances query error:", balancesError);
+
+      return res.status(500).json({
+        success: false,
+        message: "Unable to load account balances.",
+        error: balancesError.message
+      });
+    }
+
+    // 5. Get authentication users so we can get their emails
+    const {
+      data: authUsersData,
+      error: authUsersError
+    } = await supabase.auth.admin.listUsers({
+      page: 1,
+      perPage: 1000
+    });
+
+    if (authUsersError) {
+      console.error("Auth users query error:", authUsersError);
+
+      return res.status(500).json({
+        success: false,
+        message: "Unable to load authentication users.",
+        error: authUsersError.message
+      });
+    }
+
+    const authUsers = authUsersData?.users || [];
+
+    // 6. Create quick lookup maps
+    const authUserMap = new Map();
+
+    authUsers.forEach((user) => {
+      authUserMap.set(user.id, user);
+    });
+
+    const accountMap = new Map();
+
+    (accounts || []).forEach((account) => {
+      if (account.user_id) {
+        accountMap.set(account.user_id, account);
+      }
+    });
+
+    const balanceMap = new Map();
+
+    (accountBalances || []).forEach((balance) => {
+      if (balance.account_id) {
+        balanceMap.set(balance.account_id, balance);
+      }
+    });
+
+    // 7. Build final customer list
+    const users = customerProfiles.map((profile) => {
+      const authUser = authUserMap.get(profile.id);
+      const account = accountMap.get(profile.id);
+
+      const accountBalance = account
+        ? balanceMap.get(account.id)
+        : null;
+
+      const firstName = profile.first_name || "";
+      const surname = profile.surname || "";
+
+      const fullName =
+        `${firstName} ${surname}`.trim() ||
+        profile.full_name ||
+        "Unnamed User";
+
+      const availableBalance =
+        accountBalance?.available_balance ??
+        accountBalance?.balance ??
+        0;
+
+      return {
+        id: profile.id,
+
+        full_name: fullName,
+
+        first_name: firstName,
+        surname: surname,
+
+        email:
+          authUser?.email ||
+          profile.email ||
+          "No email",
+
+        phone: profile.phone || "",
+
+        balance: Number(availableBalance) || 0,
+
+        is_suspended:
+          profile.is_suspended === true ||
+          profile.is_suspended === "true" ||
+          profile.is_suspended === 1 ||
+          profile.is_suspended === "1",
+
+        account: account || null,
+
+        account_balance: accountBalance || null
+      };
+    });
+
+    console.log(`Admin loaded ${users.length} customer(s)`);
+
+    return res.status(200).json({
+      success: true,
+      users
+    });
+
+  } catch (error) {
+    console.error("GET /api/admin/users error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to load users.",
+      error: error.message
+    });
   }
-);
+});
 
 
 // =====================================================
