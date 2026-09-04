@@ -144,71 +144,170 @@ async function authenticate(req, res, next) {
 // =====================================================
 
 async function authenticateAdmin(req, res, next) {
-  try {
-    const authHeader = req.headers.authorization;
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  try {
+
+    const authHeader =
+      req.headers.authorization || "";
+
+
+    // =====================================================
+    // CHECK AUTHORIZATION HEADER
+    // =====================================================
+
+    if (!authHeader.startsWith("Bearer ")) {
+
       return res.status(401).json({
         success: false,
         message: "Authentication required"
       });
+
     }
 
-    const token = authHeader
-      .replace("Bearer ", "")
-      .trim();
+
+    const token =
+      authHeader
+        .replace("Bearer ", "")
+        .trim();
+
+
+    if (!token) {
+
+      return res.status(401).json({
+        success: false,
+        message: "Authentication token missing"
+      });
+
+    }
+
+
+    // =====================================================
+    // VERIFY SUPABASE SESSION
+    // =====================================================
 
     const {
       data: { user },
       error: authError
-    } = await supabase.auth.getUser(token);
+    } =
+      await supabase.auth.getUser(token);
+
 
     if (authError || !user) {
+
+      console.error(
+        "ADMIN TOKEN ERROR:",
+        authError
+      );
+
       return res.status(401).json({
         success: false,
         message: "Invalid or expired session"
       });
+
     }
 
-    // Check the user's admin status
+
+    // =====================================================
+    // GET ADMIN PROFILE
+    // =====================================================
+
     const {
       data: profile,
       error: profileError
-    } = await supabase
-      .from("profiles")
-      .select("id, is_admin")
-      .eq("id", user.id)
-      .maybeSingle();
+    } =
+      await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .maybeSingle();
+
 
     if (profileError) {
-      console.error("ADMIN PROFILE CHECK ERROR:", profileError);
+
+      console.error(
+        "ADMIN PROFILE CHECK ERROR:",
+        profileError
+      );
 
       return res.status(500).json({
         success: false,
-        message: "Unable to verify administrator access"
+        message:
+          "Unable to verify administrator profile"
       });
+
     }
 
-    if (!profile || profile.is_admin !== true) {
+
+    // =====================================================
+    // ADMIN PROFILE MUST EXIST
+    // =====================================================
+
+    if (!profile) {
+
+      console.error(
+        "ADMIN PROFILE NOT FOUND:",
+        user.id
+      );
+
       return res.status(403).json({
         success: false,
-        message: "Administrator access required"
+        message:
+          "Administrator profile not found"
       });
+
     }
 
+
+    // =====================================================
+    // CHECK ADMIN FLAG
+    // =====================================================
+
+    if (profile.is_admin !== true) {
+
+      console.error(
+        "USER IS NOT ADMIN:",
+        {
+          user_id: user.id,
+          is_admin: profile.is_admin
+        }
+      );
+
+      return res.status(403).json({
+        success: false,
+        message:
+          "Administrator access required"
+      });
+
+    }
+
+
+    // =====================================================
+    // ADMIN VERIFIED
+    // =====================================================
+
     req.user = user;
+
     req.profile = profile;
+
 
     next();
 
+
   } catch (error) {
-    console.error("Admin authentication error:", error);
+
+    console.error(
+      "ADMIN AUTHENTICATION ERROR:",
+      error
+    );
 
     return res.status(500).json({
       success: false,
-      message: "Admin authentication failed"
+      message:
+        "Admin authentication failed"
     });
+
   }
+
 }
 
 // =====================================================
