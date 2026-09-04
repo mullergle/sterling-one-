@@ -1891,6 +1891,7 @@ app.get(
   }
 );
 
+
 // =====================================================
 // ADMIN - GET SINGLE USER
 // =====================================================
@@ -1945,8 +1946,7 @@ app.get(
 
 
       // -------------------------------------------------
-      // Get Auth user
-      // This gives us the real email.
+      // Get email from Supabase Auth
       // -------------------------------------------------
 
       const {
@@ -2019,8 +2019,6 @@ app.get(
           status,
           created_at,
           account_balances (
-            id,
-            account_id,
             available_balance,
             ledger_balance
           )
@@ -2118,7 +2116,7 @@ app.get(
 
 
       // -------------------------------------------------
-      // Card balance
+      // Get card balance
       // -------------------------------------------------
 
       const card =
@@ -2132,20 +2130,23 @@ app.get(
 
 
       // -------------------------------------------------
-      // Full name
+      // Build full name
       // -------------------------------------------------
 
       const fullName = [
+
         profile.first_name,
+
         profile.surname
+
       ]
-        .filter(Boolean)
-        .join(" ")
-        .trim();
+      .filter(Boolean)
+      .join(" ")
+      .trim();
 
 
       // -------------------------------------------------
-      // Return normalized user
+      // Return user
       // -------------------------------------------------
 
       res.json({
@@ -2168,15 +2169,12 @@ app.get(
         },
 
         address:
-
           address || null,
 
         accounts:
-
           accounts || [],
 
         cards:
-
           cards || [],
 
         balances: {
@@ -2211,6 +2209,7 @@ app.get(
 
   }
 );
+
 
 // =====================================================
 // ADMIN - WITHDRAWALS
