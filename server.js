@@ -1657,9 +1657,6 @@ app.get(
 );
 
 
-// =====================================================
-// ADMIN - USERS
-// =====================================================
 
 // =====================================================
 // ADMIN - USERS
@@ -1895,70 +1892,325 @@ app.get(
 );
 
 // =====================================================
-// ADMIN - USER DETAILS
+// ADMIN - GET SINGLE USER
 // =====================================================
 
 app.get(
   "/api/admin/users/:id",
   authenticateAdmin,
   async (req, res) => {
+
     try {
+
       const userId = req.params.id;
 
-      const { data: profile } = await supabase
+
+      // -------------------------------------------------
+      // Get profile
+      // -------------------------------------------------
+
+      const {
+        data: profile,
+        error: profileError
+      } = await supabase
         .from("profiles")
         .select("*")
         .eq("id", userId)
         .maybeSingle();
 
+
+      if (profileError) {
+
+        console.error(
+          "ADMIN USER PROFILE ERROR:",
+          profileError
+        );
+
+        return res.status(500).json({
+          success: false,
+          message: profileError.message
+        });
+
+      }
+
+
       if (!profile) {
+
         return res.status(404).json({
           success: false,
           message: "User not found"
         });
+
       }
 
-      const { data: address } = await supabase
+
+      // -------------------------------------------------
+      // Get Auth user
+      // This gives us the real email.
+      // -------------------------------------------------
+
+      const {
+        data: authUserData,
+        error: authUserError
+      } =
+        await supabase.auth.admin.getUserById(
+          userId
+        );
+
+
+      if (authUserError) {
+
+        console.error(
+          "ADMIN USER AUTH ERROR:",
+          authUserError
+        );
+
+        return res.status(500).json({
+          success: false,
+          message: authUserError.message
+        });
+
+      }
+
+
+      const authUser =
+        authUserData?.user || null;
+
+
+      // -------------------------------------------------
+      // Get address
+      // -------------------------------------------------
+
+      const {
+        data: address,
+        error: addressError
+      } = await supabase
         .from("customer_addresses")
         .select("*")
         .eq("user_id", userId)
         .maybeSingle();
 
-      const { data: accounts } = await supabase
+
+      if (addressError) {
+
+        console.error(
+          "ADMIN USER ADDRESS ERROR:",
+          addressError
+        );
+
+      }
+
+
+      // -------------------------------------------------
+      // Get accounts
+      // -------------------------------------------------
+
+      const {
+        data: accounts,
+        error: accountsError
+      } = await supabase
         .from("accounts")
         .select(`
-          *,
+          id,
+          user_id,
+          account_number,
+          account_type,
+          currency,
+          status,
+          created_at,
           account_balances (
+            id,
+            account_id,
             available_balance,
             ledger_balance
           )
         `)
         .eq("user_id", userId);
 
-      const { data: cards } = await supabase
+
+      if (accountsError) {
+
+        console.error(
+          "ADMIN USER ACCOUNTS ERROR:",
+          accountsError
+        );
+
+        return res.status(500).json({
+          success: false,
+          message: accountsError.message
+        });
+
+      }
+
+
+      // -------------------------------------------------
+      // Get cards
+      // -------------------------------------------------
+
+      const {
+        data: cards,
+        error: cardsError
+      } = await supabase
         .from("cards")
         .select("*")
         .eq("user_id", userId);
 
+
+      if (cardsError) {
+
+        console.error(
+          "ADMIN USER CARDS ERROR:",
+          cardsError
+        );
+
+        return res.status(500).json({
+          success: false,
+          message: cardsError.message
+        });
+
+      }
+
+
+      // -------------------------------------------------
+      // Find checking account
+      // -------------------------------------------------
+
+      const checkingAccount =
+        (accounts || []).find(
+          account =>
+            String(
+              account.account_type || ""
+            ).toLowerCase() === "checking"
+        );
+
+
+      // -------------------------------------------------
+      // Find savings account
+      // -------------------------------------------------
+
+      const savingsAccount =
+        (accounts || []).find(
+          account =>
+            String(
+              account.account_type || ""
+            ).toLowerCase() === "savings"
+        );
+
+
+      // -------------------------------------------------
+      // Get balances
+      // -------------------------------------------------
+
+      const checkingBalance =
+        Number(
+          checkingAccount
+            ?.account_balances?.[0]
+            ?.available_balance ?? 0
+        );
+
+
+      const savingsBalance =
+        Number(
+          savingsAccount
+            ?.account_balances?.[0]
+            ?.available_balance ?? 0
+        );
+
+
+      // -------------------------------------------------
+      // Card balance
+      // -------------------------------------------------
+
+      const card =
+        (cards || [])[0] || null;
+
+
+      const cardBalance =
+        Number(
+          card?.balance ?? 0
+        );
+
+
+      // -------------------------------------------------
+      // Full name
+      // -------------------------------------------------
+
+      const fullName = [
+        profile.first_name,
+        profile.surname
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .trim();
+
+
+      // -------------------------------------------------
+      // Return normalized user
+      // -------------------------------------------------
+
       res.json({
+
         success: true,
-        profile,
-        address,
-        accounts,
-        cards
+
+        profile: {
+
+          ...profile,
+
+          full_name:
+            fullName ||
+            "Unnamed User",
+
+          email:
+            authUser?.email ||
+            profile.email ||
+            "No email"
+
+        },
+
+        address:
+
+          address || null,
+
+        accounts:
+
+          accounts || [],
+
+        cards:
+
+          cards || [],
+
+        balances: {
+
+          checking:
+            checkingBalance,
+
+          savings:
+            savingsBalance,
+
+          card:
+            cardBalance
+
+        }
+
       });
 
+
     } catch (error) {
-      console.error(error);
+
+      console.error(
+        "ADMIN USER DETAILS ERROR:",
+        error
+      );
 
       res.status(500).json({
         success: false,
         message: "Unable to load user"
       });
+
     }
+
   }
 );
-
 
 // =====================================================
 // ADMIN - WITHDRAWALS
