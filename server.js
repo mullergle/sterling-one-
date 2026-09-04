@@ -285,7 +285,7 @@ app.post("/api/auth/register", async (req, res) => {
     } = await supabase.auth.admin.createUser({
       email: email.toLowerCase().trim(),
       password: pass,
-      email_confirm: false
+      email_confirm: true
     });
 
     if (authError) {
