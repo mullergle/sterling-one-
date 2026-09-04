@@ -142,75 +142,50 @@ async function authenticate(req, res, next) {
 // =====================================================
 // ADMIN MIDDLEWARE
 // =====================================================
-
 async function authenticateAdmin(req, res, next) {
-
   try {
-
     const authHeader =
       req.headers.authorization || "";
-
-
-    // =====================================================
+    // -------------------------------------------------
     // CHECK AUTHORIZATION HEADER
-    // =====================================================
-
+    // -------------------------------------------------
     if (!authHeader.startsWith("Bearer ")) {
-
       return res.status(401).json({
         success: false,
         message: "Authentication required"
       });
-
     }
-
-
     const token =
       authHeader
         .replace("Bearer ", "")
         .trim();
-
-
     if (!token) {
-
       return res.status(401).json({
         success: false,
         message: "Authentication token missing"
       });
-
     }
-
-
-    // =====================================================
+    // -------------------------------------------------
     // VERIFY SUPABASE SESSION
-    // =====================================================
-
+    // -------------------------------------------------
     const {
       data: { user },
       error: authError
     } =
       await supabase.auth.getUser(token);
-
-
     if (authError || !user) {
-
       console.error(
         "ADMIN TOKEN ERROR:",
         authError
       );
-
       return res.status(401).json({
         success: false,
         message: "Invalid or expired session"
       });
-
     }
-
-
-    // =====================================================
+    // -------------------------------------------------
     // GET ADMIN PROFILE
-    // =====================================================
-
+    // -------------------------------------------------
     const {
       data: profile,
       error: profileError
@@ -220,95 +195,83 @@ async function authenticateAdmin(req, res, next) {
         .select("*")
         .eq("id", user.id)
         .maybeSingle();
-
-
     if (profileError) {
-
       console.error(
         "ADMIN PROFILE CHECK ERROR:",
         profileError
       );
-
       return res.status(500).json({
         success: false,
         message:
           "Unable to verify administrator profile"
       });
-
     }
-
-
-    // =====================================================
-    // ADMIN PROFILE MUST EXIST
-    // =====================================================
-
+    // -------------------------------------------------
+    // PROFILE MUST EXIST
+    // -------------------------------------------------
     if (!profile) {
-
       console.error(
         "ADMIN PROFILE NOT FOUND:",
         user.id
       );
-
       return res.status(403).json({
         success: false,
         message:
           "Administrator profile not found"
       });
-
     }
-
-
-    // =====================================================
-    // CHECK ADMIN FLAG
-    // =====================================================
-
-    if (profile.is_admin !== true) {
-
+    // -------------------------------------------------
+    // CHECK ADMIN STATUS
+    // -------------------------------------------------
+    const isAdmin =
+      profile.is_admin === true ||
+      profile.is_admin === "true" ||
+      profile.is_admin === 1 ||
+      profile.is_admin === "1";
+    console.log(
+      "ADMIN ACCESS CHECK:",
+      {
+        user_id: user.id,
+        email: user.email,
+        is_admin_value: profile.is_admin,
+        is_admin_type: typeof profile.is_admin,
+        is_admin: isAdmin
+      }
+    );
+    if (!isAdmin) {
       console.error(
         "USER IS NOT ADMIN:",
         {
           user_id: user.id,
+          email: user.email,
           is_admin: profile.is_admin
         }
       );
-
       return res.status(403).json({
         success: false,
         message:
           "Administrator access required"
       });
-
     }
-
-
-    // =====================================================
+    // -------------------------------------------------
     // ADMIN VERIFIED
-    // =====================================================
-
+    // -------------------------------------------------
     req.user = user;
-
     req.profile = profile;
-
-
     next();
-
-
   } catch (error) {
-
     console.error(
       "ADMIN AUTHENTICATION ERROR:",
       error
     );
-
     return res.status(500).json({
       success: false,
       message:
         "Admin authentication failed"
     });
-
   }
-
 }
+
 
 // =====================================================
 // REGISTER
