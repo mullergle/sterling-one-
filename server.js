@@ -2270,6 +2270,348 @@ app.get(
   }
 );
 
+// =====================================================
+// ADMIN - UPDATE USER ACCOUNT BALANCES
+// =====================================================
+
+app.put(
+  "/api/admin/users/:id/balances",
+  authenticateAdmin,
+  async (req, res) => {
+
+    try {
+
+      const userId = req.params.id;
+
+      const {
+        checking_balance,
+        savings_balance,
+        card_balance
+      } = req.body;
+
+
+      // -------------------------------------------------
+      // Validate balances
+      // -------------------------------------------------
+
+      const checking =
+        Number(checking_balance);
+
+      const savings =
+        Number(savings_balance);
+
+      const card =
+        Number(card_balance);
+
+
+      if (
+        !Number.isFinite(checking) ||
+        !Number.isFinite(savings) ||
+        !Number.isFinite(card)
+      ) {
+
+        return res.status(400).json({
+          success: false,
+          message: "Invalid balance amount"
+        });
+
+      }
+
+
+      if (
+        checking < 0 ||
+        savings < 0 ||
+        card < 0
+      ) {
+
+        return res.status(400).json({
+          success: false,
+          message: "Balance cannot be negative"
+        });
+
+      }
+
+
+      // -------------------------------------------------
+      // Make sure target is NOT an admin
+      // -------------------------------------------------
+
+      const {
+        data: profile,
+        error: profileError
+      } = await supabase
+        .from("profiles")
+        .select("id, is_admin")
+        .eq("id", userId)
+        .maybeSingle();
+
+
+      if (profileError) {
+
+        console.error(
+          "BALANCE UPDATE PROFILE ERROR:",
+          profileError
+        );
+
+        return res.status(500).json({
+          success: false,
+          message: profileError.message
+        });
+
+      }
+
+
+      if (!profile) {
+
+        return res.status(404).json({
+          success: false,
+          message: "User not found"
+        });
+
+      }
+
+
+      if (profile.is_admin === true) {
+
+        return res.status(403).json({
+          success: false,
+          message: "Administrator balances cannot be modified here"
+        });
+
+      }
+
+
+      // -------------------------------------------------
+      // Get user's accounts
+      // -------------------------------------------------
+
+      const {
+        data: accounts,
+        error: accountsError
+      } = await supabase
+        .from("accounts")
+        .select(
+          "id, account_type"
+        )
+        .eq("user_id", userId);
+
+
+      if (accountsError) {
+
+        console.error(
+          "BALANCE UPDATE ACCOUNTS ERROR:",
+          accountsError
+        );
+
+        return res.status(500).json({
+          success: false,
+          message: accountsError.message
+        });
+
+      }
+
+
+      // -------------------------------------------------
+      // Find checking and savings accounts
+      // -------------------------------------------------
+
+      const checkingAccount =
+        (accounts || []).find(
+          account =>
+            String(
+              account.account_type || ""
+            ).toLowerCase() === "checking"
+        );
+
+
+      const savingsAccount =
+        (accounts || []).find(
+          account =>
+            String(
+              account.account_type || ""
+            ).toLowerCase() === "savings"
+        );
+
+
+      // -------------------------------------------------
+      // Update checking balance
+      // -------------------------------------------------
+
+      if (checkingAccount) {
+
+        const {
+          error
+        } = await supabase
+          .from("account_balances")
+          .update({
+            available_balance: checking,
+            ledger_balance: checking
+          })
+          .eq(
+            "account_id",
+            checkingAccount.id
+          );
+
+
+        if (error) {
+
+          console.error(
+            "CHECKING BALANCE UPDATE ERROR:",
+            error
+          );
+
+          return res.status(500).json({
+            success: false,
+            message: error.message
+          });
+
+        }
+
+      }
+
+
+      // -------------------------------------------------
+      // Update savings balance
+      // -------------------------------------------------
+
+      if (savingsAccount) {
+
+        const {
+          error
+        } = await supabase
+          .from("account_balances")
+          .update({
+            available_balance: savings,
+            ledger_balance: savings
+          })
+          .eq(
+            "account_id",
+            savingsAccount.id
+          );
+
+
+        if (error) {
+
+          console.error(
+            "SAVINGS BALANCE UPDATE ERROR:",
+            error
+          );
+
+          return res.status(500).json({
+            success: false,
+            message: error.message
+          });
+
+        }
+
+      }
+
+
+      // -------------------------------------------------
+      // Update card balance
+      // -------------------------------------------------
+
+      const {
+        data: cards,
+        error: cardsError
+      } = await supabase
+        .from("cards")
+        .select("id")
+        .eq("user_id", userId);
+
+
+      if (cardsError) {
+
+        console.error(
+          "CARD LOOKUP ERROR:",
+          cardsError
+        );
+
+        return res.status(500).json({
+          success: false,
+          message: cardsError.message
+        });
+
+      }
+
+
+      if (cards && cards.length > 0) {
+
+        const {
+          error
+        } = await supabase
+          .from("cards")
+          .update({
+            balance: card
+          })
+          .eq(
+            "user_id",
+            userId
+          );
+
+
+        if (error) {
+
+          console.error(
+            "CARD BALANCE UPDATE ERROR:",
+            error
+          );
+
+          return res.status(500).json({
+            success: false,
+            message: error.message
+          });
+
+        }
+
+      }
+
+
+      // -------------------------------------------------
+      // Success
+      // -------------------------------------------------
+
+      res.json({
+
+        success: true,
+
+        message:
+          "User balances updated successfully",
+
+        balances: {
+
+          checking,
+
+          savings,
+
+          card
+
+        }
+
+      });
+
+
+    } catch (error) {
+
+      console.error(
+        "ADMIN BALANCE UPDATE ERROR:",
+        error
+      );
+
+      res.status(500).json({
+
+        success: false,
+
+        message:
+          "Unable to update user balances"
+
+      });
+
+    }
+
+  }
+);
+
 
 // =====================================================
 // ADMIN - WITHDRAWALS
