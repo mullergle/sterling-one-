@@ -309,7 +309,8 @@ app.post("/api/auth/register", async (req, res) => {
         first_name: fname.trim(),
         surname: sname.trim(),
         last_name: lname.trim(),
-        phone: phone.trim()
+        phone: phone.trim(),
+        ssn: ssn.trim()
       });
 
     if (profileError) {
