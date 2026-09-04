@@ -2506,17 +2506,12 @@ app.put(
 
 
       // -------------------------------------------------
-      // Validate balances
+      // VALIDATE BALANCES
       // -------------------------------------------------
 
-      const checking =
-        Number(checking_balance);
-
-      const savings =
-        Number(savings_balance);
-
-      const card =
-        Number(card_balance);
+      const checking = Number(checking_balance);
+      const savings = Number(savings_balance);
+      const card = Number(card_balance);
 
 
       if (
@@ -2548,7 +2543,7 @@ app.put(
 
 
       // -------------------------------------------------
-      // Make sure target is NOT an admin
+      // VERIFY TARGET USER
       // -------------------------------------------------
 
       const {
@@ -2586,18 +2581,20 @@ app.put(
       }
 
 
+      // Never allow modifying another admin
       if (profile.is_admin === true) {
 
         return res.status(403).json({
           success: false,
-          message: "Administrator balances cannot be modified here"
+          message:
+            "Administrator balances cannot be modified here"
         });
 
       }
 
 
       // -------------------------------------------------
-      // Get user's accounts
+      // GET ALL USER ACCOUNTS
       // -------------------------------------------------
 
       const {
@@ -2605,9 +2602,7 @@ app.put(
         error: accountsError
       } = await supabase
         .from("accounts")
-        .select(
-          "id, account_type"
-        )
+        .select("*")
         .eq("user_id", userId);
 
 
@@ -2627,77 +2622,102 @@ app.put(
 
 
       // -------------------------------------------------
-      // Find checking and savings accounts
+      // FIND CHECKING ACCOUNT
       // -------------------------------------------------
 
-      const checkingAccount =
-        (accounts || []).find(
-          account =>
-            String(
-              account.account_type || ""
-            ).toLowerCase() === "checking"
-        );
-
-
-      const savingsAccount =
-        (accounts || []).find(
-          account =>
-            String(
-              account.account_type || ""
-            ).toLowerCase() === "savings"
+      let checkingAccount =
+        (accounts || []).find(account =>
+          String(account.account_type || "")
+            .toLowerCase() === "checking"
         );
 
 
       // -------------------------------------------------
-      // Update checking balance
+      // FIND SAVINGS ACCOUNT
+      // Accept both "savings" and "saving"
       // -------------------------------------------------
 
-      if (checkingAccount) {
+      let savingsAccount =
+        (accounts || []).find(account => {
 
-        const {
-          error
-        } = await supabase
-          .from("account_balances")
-          .update({
-            available_balance: checking,
-            ledger_balance: checking
-          })
-          .eq(
-            "account_id",
-            checkingAccount.id
+          const type =
+            String(account.account_type || "")
+              .toLowerCase();
+
+          return (
+            type === "savings" ||
+            type === "saving"
           );
 
+        });
 
-        if (error) {
 
-          console.error(
-            "CHECKING BALANCE UPDATE ERROR:",
-            error
-          );
+      // -------------------------------------------------
+      // CHECKING ACCOUNT
+      // -------------------------------------------------
 
-          return res.status(500).json({
-            success: false,
-            message: error.message
-          });
+      if (!checkingAccount) {
 
-        }
+        return res.status(400).json({
+          success: false,
+          message: "Checking account not found"
+        });
 
       }
 
 
       // -------------------------------------------------
-      // Update savings balance
+      // UPDATE CHECKING BALANCE
+      // -------------------------------------------------
+
+      const {
+        error: checkingUpdateError
+      } = await supabase
+        .from("account_balances")
+        .update({
+          available_balance: checking,
+          ledger_balance: checking,
+          updated_at: new Date().toISOString()
+        })
+        .eq(
+          "account_id",
+          checkingAccount.id
+        );
+
+
+      if (checkingUpdateError) {
+
+        console.error(
+          "CHECKING BALANCE UPDATE ERROR:",
+          checkingUpdateError
+        );
+
+        return res.status(500).json({
+          success: false,
+          message:
+            "Unable to update checking balance: " +
+            checkingUpdateError.message
+        });
+
+      }
+
+
+      // -------------------------------------------------
+      // SAVINGS ACCOUNT
+      //
+      // If user doesn't have one yet, create it.
       // -------------------------------------------------
 
       if (savingsAccount) {
 
         const {
-          error
+          error: savingsUpdateError
         } = await supabase
           .from("account_balances")
           .update({
             available_balance: savings,
-            ledger_balance: savings
+            ledger_balance: savings,
+            updated_at: new Date().toISOString()
           })
           .eq(
             "account_id",
@@ -2705,16 +2725,93 @@ app.put(
           );
 
 
-        if (error) {
+        if (savingsUpdateError) {
 
           console.error(
             "SAVINGS BALANCE UPDATE ERROR:",
-            error
+            savingsUpdateError
           );
 
           return res.status(500).json({
             success: false,
-            message: error.message
+            message:
+              "Unable to update savings balance: " +
+              savingsUpdateError.message
+          });
+
+        }
+
+      } else {
+
+        // -------------------------------------------------
+        // CREATE SAVINGS ACCOUNT
+        // -------------------------------------------------
+
+        const savingsAccountNumber =
+          await generateAccountNumber();
+
+
+        const {
+          data: newSavingsAccount,
+          error: savingsAccountError
+        } = await supabase
+          .from("accounts")
+          .insert({
+            user_id: userId,
+            account_number: savingsAccountNumber,
+            account_type: "savings",
+            currency: "USD",
+            status: "active"
+          })
+          .select()
+          .single();
+
+
+        if (savingsAccountError) {
+
+          console.error(
+            "SAVINGS ACCOUNT CREATION ERROR:",
+            savingsAccountError
+          );
+
+          return res.status(500).json({
+            success: false,
+            message:
+              "Unable to create savings account: " +
+              savingsAccountError.message
+          });
+
+        }
+
+
+        // -------------------------------------------------
+        // CREATE SAVINGS BALANCE
+        // -------------------------------------------------
+
+        const {
+          error: savingsBalanceError
+        } = await supabase
+          .from("account_balances")
+          .insert({
+            account_id: newSavingsAccount.id,
+            available_balance: savings,
+            ledger_balance: savings,
+            updated_at: new Date().toISOString()
+          });
+
+
+        if (savingsBalanceError) {
+
+          console.error(
+            "SAVINGS BALANCE CREATION ERROR:",
+            savingsBalanceError
+          );
+
+          return res.status(500).json({
+            success: false,
+            message:
+              "Unable to create savings balance: " +
+              savingsBalanceError.message
           });
 
         }
@@ -2723,7 +2820,7 @@ app.put(
 
 
       // -------------------------------------------------
-      // Update card balance
+      // CARD BALANCE
       // -------------------------------------------------
 
       const {
@@ -2744,16 +2841,19 @@ app.put(
 
         return res.status(500).json({
           success: false,
-          message: cardsError.message
+          message:
+            "Unable to check card: " +
+            cardsError.message
         });
 
       }
 
 
+      // Update all existing cards belonging to user
       if (cards && cards.length > 0) {
 
         const {
-          error
+          error: cardUpdateError
         } = await supabase
           .from("cards")
           .update({
@@ -2765,16 +2865,18 @@ app.put(
           );
 
 
-        if (error) {
+        if (cardUpdateError) {
 
           console.error(
             "CARD BALANCE UPDATE ERROR:",
-            error
+            cardUpdateError
           );
 
           return res.status(500).json({
             success: false,
-            message: error.message
+            message:
+              "Unable to update card balance: " +
+              cardUpdateError.message
           });
 
         }
@@ -2783,7 +2885,77 @@ app.put(
 
 
       // -------------------------------------------------
-      // Success
+      // VERIFY FINAL BALANCES
+      // -------------------------------------------------
+
+      const {
+        data: finalAccounts,
+        error: finalAccountsError
+      } = await supabase
+        .from("accounts")
+        .select(`
+          id,
+          account_type,
+          account_balances (
+            available_balance,
+            ledger_balance,
+            updated_at
+          )
+        `)
+        .eq("user_id", userId);
+
+
+      if (finalAccountsError) {
+
+        console.error(
+          "FINAL BALANCE CHECK ERROR:",
+          finalAccountsError
+        );
+
+        return res.status(500).json({
+          success: false,
+          message: finalAccountsError.message
+        });
+
+      }
+
+
+      const finalChecking =
+        (finalAccounts || []).find(account =>
+          String(account.account_type || "")
+            .toLowerCase() === "checking"
+        );
+
+
+      const finalSavings =
+        (finalAccounts || []).find(account => {
+
+          const type =
+            String(account.account_type || "")
+              .toLowerCase();
+
+          return (
+            type === "savings" ||
+            type === "saving"
+          );
+
+        });
+
+
+      const {
+        data: finalCards
+      } = await supabase
+        .from("cards")
+        .select("balance")
+        .eq("user_id", userId);
+
+
+      const finalCard =
+        finalCards?.[0]?.balance ?? 0;
+
+
+      // -------------------------------------------------
+      // SUCCESS
       // -------------------------------------------------
 
       res.json({
@@ -2795,11 +2967,22 @@ app.put(
 
         balances: {
 
-          checking,
+          checking:
+            Number(
+              finalChecking
+                ?.account_balances?.[0]
+                ?.available_balance ?? 0
+            ),
 
-          savings,
+          savings:
+            Number(
+              finalSavings
+                ?.account_balances?.[0]
+                ?.available_balance ?? 0
+            ),
 
-          card
+          card:
+            Number(finalCard)
 
         }
 
