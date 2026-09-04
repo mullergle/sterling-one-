@@ -310,14 +310,16 @@ app.post("/api/auth/register", async (req, res) => {
         ssn: ssn.trim()
       });
 
-    if (profileError) {
-      await supabase.auth.admin.deleteUser(userId);
+     if (profileError) {
+  console.error("PROFILE INSERT ERROR:", profileError);
 
-      return res.status(500).json({
-        success: false,
-        message: "Unable to create customer profile"
-      });
-    }
+  await supabase.auth.admin.deleteUser(userId);
+
+  return res.status(500).json({
+    success: false,
+    message: profileError.message
+  });
+}
 
 
     // -----------------------------
