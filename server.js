@@ -6,19 +6,41 @@ const crypto = require("crypto");
 
 const supabase = require("./supabase");
 
+const app = express();
+
+/* =====================================================
+   CONFIG
+===================================================== */
+
+const PORT = process.env.PORT || 5000;
+
+if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  console.error("WARNING: SUPABASE_SERVICE_ROLE_KEY is missing");
+}
+
 console.log(
   "SERVICE ROLE KEY LOADED:",
   !!process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-const app = express();
+/* =====================================================
+   MIDDLEWARE
+===================================================== */
 
-app.use(cors());
-app.use(express.json());
+app.use(
+  cors({
+    origin: true,
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"]
+  })
+);
 
-// =====================================================
-// BASIC
-// =====================================================
+app.use(express.json({ limit: "2mb" }));
+
+/* =====================================================
+   BASIC
+===================================================== */
 
 app.get("/", (req, res) => {
   res.json({
@@ -27,9 +49,17 @@ app.get("/", (req, res) => {
   });
 });
 
-// =====================================================
-// SUPABASE TEST
-// =====================================================
+app.get("/api/health", (req, res) => {
+  res.json({
+    success: true,
+    message: "API healthy",
+    timestamp: new Date().toISOString()
+  });
+});
+
+/* =====================================================
+   SUPABASE TEST
+===================================================== */
 
 app.get("/api/test-supabase", async (req, res) => {
   try {
@@ -39,6 +69,8 @@ app.get("/api/test-supabase", async (req, res) => {
       .limit(1);
 
     if (error) {
+      console.error("SUPABASE TEST ERROR:", error);
+
       return res.status(500).json({
         success: false,
         message: "Supabase connection failed",
@@ -46,24 +78,24 @@ app.get("/api/test-supabase", async (req, res) => {
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       message: "Supabase connection successful"
     });
-
   } catch (error) {
-    console.error(error);
+    console.error("SUPABASE TEST EXCEPTION:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      message: "Internal server error"
+      message: "Internal server error",
+      error: error.message
     });
   }
 });
 
-// =====================================================
-// HELPERS
-// =====================================================
+/* =====================================================
+   HELPERS
+===================================================== */
 
 function generateReference(prefix = "STL") {
   return `${prefix}-${Date.now()}-${crypto
@@ -76,91 +108,65 @@ function isAdminValue(value) {
   if (value === true) return true;
   if (value === 1) return true;
   if (value === "1") return true;
-  if (String(value).trim().toLowerCase() === "true") return true;
 
-  return false;
+  return String(value || "")
+    .trim()
+    .toLowerCase() === "true";
 }
 
 function isSuspendedValue(value) {
   if (value === true) return true;
   if (value === 1) return true;
   if (value === "1") return true;
-  if (String(value).trim().toLowerCase() === "true") return true;
 
-  return false;
+  return String(value || "")
+    .trim()
+    .toLowerCase() === "true";
 }
 
 async function generateAccountNumber() {
-  while (true) {
+  for (let attempt = 0; attempt < 20; attempt++) {
     const number =
       "4" +
       Math.floor(100000000 + Math.random() * 900000000);
 
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("accounts")
       .select("id")
       .eq("account_number", number)
       .maybeSingle();
 
+    if (error) {
+      console.error(
+        "ACCOUNT NUMBER CHECK ERROR:",
+        error
+      );
+
+      throw new Error(
+        "Unable to generate account number"
+      );
+    }
+
     if (!data) {
       return number;
     }
   }
+
+  throw new Error(
+    "Unable to generate unique account number"
+  );
 }
 
-// =====================================================
-// AUTH MIDDLEWARE
-// =====================================================
+/* =====================================================
+   AUTHENTICATION
+===================================================== */
 
 async function authenticate(req, res, next) {
   try {
-    const authHeader = req.headers.authorization;
-
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({
-        success: false,
-        message: "Authentication required"
-      });
-    }
-
-    const token = authHeader.replace("Bearer ", "").trim();
-
-    const {
-      data: { user },
-      error
-    } = await supabase.auth.getUser(token);
-
-    if (error || !user) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid or expired session"
-      });
-    }
-
-    req.user = user;
-
-    next();
-
-  } catch (error) {
-    console.error(error);
-
-    res.status(401).json({
-      success: false,
-      message: "Authentication failed"
-    });
-  }
-}
-
-// =====================================================
-// ADMIN MIDDLEWARE
-// =====================================================
-
-async function authenticateAdmin(req, res, next) {
-  try {
-    const authHeader =
+    const authorization =
       req.headers.authorization || "";
 
-    if (!authHeader.startsWith("Bearer ")) {
+    if (!authorization.startsWith("Bearer ")) {
       return res.status(401).json({
         success: false,
         message: "Authentication required"
@@ -168,9 +174,7 @@ async function authenticateAdmin(req, res, next) {
     }
 
     const token =
-      authHeader
-        .replace("Bearer ", "")
-        .trim();
+      authorization.substring(7).trim();
 
     if (!token) {
       return res.status(401).json({
@@ -180,14 +184,73 @@ async function authenticateAdmin(req, res, next) {
     }
 
     const {
-      data: { user },
-      error: authError
-    } =
-      await supabase.auth.getUser(token);
+      data,
+      error
+    } = await supabase.auth.getUser(token);
 
-    if (authError || !user) {
+    if (error || !data?.user) {
       console.error(
-        "ADMIN TOKEN ERROR:",
+        "AUTHENTICATION ERROR:",
+        error
+      );
+
+      return res.status(401).json({
+        success: false,
+        message: "Invalid or expired session"
+      });
+    }
+
+    req.user = data.user;
+    req.accessToken = token;
+
+    next();
+  } catch (error) {
+    console.error(
+      "AUTHENTICATION EXCEPTION:",
+      error
+    );
+
+    return res.status(401).json({
+      success: false,
+      message: "Authentication failed"
+    });
+  }
+}
+
+/* =====================================================
+   ADMIN AUTHENTICATION
+===================================================== */
+
+async function authenticateAdmin(req, res, next) {
+  try {
+    const authorization =
+      req.headers.authorization || "";
+
+    if (!authorization.startsWith("Bearer ")) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required"
+      });
+    }
+
+    const token =
+      authorization.substring(7).trim();
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication token missing"
+      });
+    }
+
+    const {
+      data: authData,
+      error: authError
+    } = await supabase.auth.getUser(token);
+
+    if (authError || !authData?.user) {
+      console.error(
+        "ADMIN AUTH ERROR:",
         authError
       );
 
@@ -197,96 +260,76 @@ async function authenticateAdmin(req, res, next) {
       });
     }
 
+    const user =
+      authData.user;
+
     const {
       data: profile,
       error: profileError
-    } =
-      await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", user.id)
-        .maybeSingle();
+    } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", user.id)
+      .maybeSingle();
 
     if (profileError) {
       console.error(
-        "ADMIN PROFILE CHECK ERROR:",
+        "ADMIN PROFILE ERROR:",
         profileError
       );
 
       return res.status(500).json({
         success: false,
-        message:
-          "Unable to verify administrator profile"
+        message: "Unable to verify administrator profile"
       });
     }
 
     if (!profile) {
-      console.error(
-        "ADMIN PROFILE NOT FOUND:",
-        user.id
-      );
-
       return res.status(403).json({
         success: false,
-        message:
-          "Administrator profile not found"
+        message: "Administrator profile not found"
       });
     }
 
-    const isAdmin = isAdminValue(profile.is_admin);
-
-    console.log(
-      "ADMIN ACCESS CHECK:",
-      {
-        user_id: user.id,
-        email: user.email,
-        is_admin_value: profile.is_admin,
-        is_admin_type: typeof profile.is_admin,
-        is_admin: isAdmin
-      }
-    );
-
-    if (!isAdmin) {
-      console.error(
-        "USER IS NOT ADMIN:",
-        {
-          user_id: user.id,
-          email: user.email,
-          is_admin: profile.is_admin
-        }
-      );
-
+    if (!isAdminValue(profile.is_admin)) {
       return res.status(403).json({
         success: false,
-        message:
-          "Administrator access required"
+        message: "Administrator access required"
+      });
+    }
+
+    if (isSuspendedValue(profile.is_suspended)) {
+      return res.status(403).json({
+        success: false,
+        message: "Administrator account is suspended"
       });
     }
 
     req.user = user;
     req.profile = profile;
+    req.accessToken = token;
 
     next();
-
   } catch (error) {
     console.error(
-      "ADMIN AUTHENTICATION ERROR:",
+      "ADMIN AUTH EXCEPTION:",
       error
     );
 
     return res.status(500).json({
       success: false,
-      message:
-        "Admin authentication failed"
+      message: "Admin authentication failed"
     });
   }
 }
 
-// =====================================================
-// REGISTER
-// =====================================================
+/* =====================================================
+   REGISTER
+===================================================== */
 
 app.post("/api/auth/register", async (req, res) => {
+  let createdUserId = null;
+
   try {
     const {
       fname,
@@ -301,12 +344,17 @@ app.post("/api/auth/register", async (req, res) => {
       city,
       address,
       terms
-    } = req.body;
+    } = req.body || {};
+
+    const cleanEmail =
+      String(email || "")
+        .trim()
+        .toLowerCase();
 
     if (
       !fname ||
       !sname ||
-      !email ||
+      !cleanEmail ||
       !phone ||
       !pass ||
       !cpass ||
@@ -336,7 +384,7 @@ app.post("/api/auth/register", async (req, res) => {
       });
     }
 
-    if (pass.length < 8) {
+    if (String(pass).length < 8) {
       return res.status(400).json({
         success: false,
         message:
@@ -344,37 +392,55 @@ app.post("/api/auth/register", async (req, res) => {
       });
     }
 
+    /* ---------------------------------------------
+       CREATE SUPABASE AUTH USER
+    --------------------------------------------- */
+
     const {
       data: authData,
       error: authError
-    } = await supabase.auth.admin.createUser({
-      email: email.toLowerCase().trim(),
-      password: pass,
-      email_confirm: true
-    });
+    } =
+      await supabase.auth.admin.createUser({
+        email: cleanEmail,
+        password: pass,
+        email_confirm: true
+      });
 
-    if (authError) {
+    if (authError || !authData?.user) {
+      console.error(
+        "CREATE AUTH USER ERROR:",
+        authError
+      );
+
       return res.status(400).json({
         success: false,
-        message: authError.message
+        message:
+          authError?.message ||
+          "Unable to create account"
       });
     }
 
-    const userId = authData.user.id;
+    createdUserId =
+      authData.user.id;
 
-    // IMPORTANT:
-    // Every newly registered account is a CUSTOMER.
-    // It must never be created as an administrator.
+    /* ---------------------------------------------
+       CREATE PROFILE
+    --------------------------------------------- */
+
     const {
       error: profileError
     } = await supabase
       .from("profiles")
       .insert({
-        id: userId,
-        first_name: fname.trim(),
-        surname: sname.trim(),
-        phone: phone.trim(),
-        ssn: ssn ? ssn.trim() : null,
+        id: createdUserId,
+        first_name: String(fname).trim(),
+        surname: String(sname).trim(),
+        phone: String(phone).trim(),
+        ssn: ssn
+          ? String(ssn).trim()
+          : null,
+
+        /* IMPORTANT */
         is_admin: false,
         is_suspended: false
       });
@@ -385,24 +451,32 @@ app.post("/api/auth/register", async (req, res) => {
         profileError
       );
 
-      await supabase.auth.admin.deleteUser(userId);
+      await supabase.auth.admin.deleteUser(
+        createdUserId
+      );
 
       return res.status(500).json({
         success: false,
-        message: profileError.message
+        message:
+          "Unable to create customer profile",
+        error: profileError.message
       });
     }
+
+    /* ---------------------------------------------
+       ADDRESS
+    --------------------------------------------- */
 
     const {
       error: addressError
     } = await supabase
       .from("customer_addresses")
       .insert({
-        user_id: userId,
-        country: country.trim(),
-        state: state.trim(),
-        city: city.trim(),
-        house_address: address.trim()
+        user_id: createdUserId,
+        country: String(country).trim(),
+        state: String(state).trim(),
+        city: String(city).trim(),
+        house_address: String(address).trim()
       });
 
     if (addressError) {
@@ -411,14 +485,21 @@ app.post("/api/auth/register", async (req, res) => {
         addressError
       );
 
-      await supabase.auth.admin.deleteUser(userId);
+      await supabase.auth.admin.deleteUser(
+        createdUserId
+      );
 
       return res.status(500).json({
         success: false,
         message:
-          "Unable to save customer address"
+          "Unable to save customer address",
+        error: addressError.message
       });
     }
+
+    /* ---------------------------------------------
+       ACCOUNT
+    --------------------------------------------- */
 
     const accountNumber =
       await generateAccountNumber();
@@ -429,7 +510,7 @@ app.post("/api/auth/register", async (req, res) => {
     } = await supabase
       .from("accounts")
       .insert({
-        user_id: userId,
+        user_id: createdUserId,
         account_number: accountNumber,
         account_type: "checking",
         currency: "USD",
@@ -438,20 +519,28 @@ app.post("/api/auth/register", async (req, res) => {
       .select()
       .single();
 
-    if (accountError) {
+    if (accountError || !account) {
       console.error(
         "ACCOUNT CREATION ERROR:",
         accountError
       );
 
-      await supabase.auth.admin.deleteUser(userId);
+      await supabase.auth.admin.deleteUser(
+        createdUserId
+      );
 
       return res.status(500).json({
         success: false,
         message:
-          "Unable to create bank account"
+          "Unable to create bank account",
+        error:
+          accountError?.message
       });
     }
+
+    /* ---------------------------------------------
+       ACCOUNT BALANCE
+    --------------------------------------------- */
 
     const {
       error: balanceError
@@ -469,74 +558,134 @@ app.post("/api/auth/register", async (req, res) => {
         balanceError
       );
 
-      await supabase.auth.admin.deleteUser(userId);
+      await supabase.auth.admin.deleteUser(
+        createdUserId
+      );
 
       return res.status(500).json({
         success: false,
         message:
-          "Unable to create account balance"
+          "Unable to create account balance",
+        error: balanceError.message
       });
     }
 
-    await supabase
-      .from("customer_consents")
-      .insert({
-        user_id: userId,
-        consent_type: "terms",
-        version: "1.0"
-      });
+    /* ---------------------------------------------
+       OPTIONAL DATA
+       
+       These MUST NOT make registration fail.
+    --------------------------------------------- */
 
-    await supabase
-      .from("customer_consents")
-      .insert({
-        user_id: userId,
-        consent_type: "privacy",
-        version: "1.0"
-      });
+    try {
+      await supabase
+        .from("customer_consents")
+        .insert({
+          user_id: createdUserId,
+          consent_type: "terms",
+          version: "1.0"
+        });
+    } catch (error) {
+      console.error(
+        "TERMS CONSENT ERROR:",
+        error
+      );
+    }
 
-    await supabase
-      .from("notifications")
-      .insert({
-        user_id: userId,
-        title:
-          "Welcome to Sterling One Bank",
-        message:
-          "Your Sterling One Bank account has been created successfully.",
-        type: "account"
-      });
+    try {
+      await supabase
+        .from("customer_consents")
+        .insert({
+          user_id: createdUserId,
+          consent_type: "privacy",
+          version: "1.0"
+        });
+    } catch (error) {
+      console.error(
+        "PRIVACY CONSENT ERROR:",
+        error
+      );
+    }
 
-    res.status(201).json({
+    try {
+      await supabase
+        .from("notifications")
+        .insert({
+          user_id: createdUserId,
+          title:
+            "Welcome to Sterling One Bank",
+          message:
+            "Your Sterling One Bank account has been created successfully.",
+          type: "account"
+        });
+    } catch (error) {
+      console.error(
+        "WELCOME NOTIFICATION ERROR:",
+        error
+      );
+    }
+
+    return res.status(201).json({
       success: true,
       message: "Registration successful",
-      user_id: userId,
-      account_number: accountNumber
-    });
 
+      user_id:
+        createdUserId,
+
+      account_number:
+        accountNumber,
+
+      user: {
+        id:
+          createdUserId,
+        email:
+          cleanEmail
+      }
+    });
   } catch (error) {
     console.error(
-      "Registration error:",
+      "REGISTRATION ERROR:",
       error
     );
 
-    res.status(500).json({
+    if (createdUserId) {
+      try {
+        await supabase.auth.admin.deleteUser(
+          createdUserId
+        );
+      } catch (cleanupError) {
+        console.error(
+          "REGISTRATION CLEANUP ERROR:",
+          cleanupError
+        );
+      }
+    }
+
+    return res.status(500).json({
       success: false,
-      message: "Internal server error"
+      message:
+        error.message ||
+        "Unable to complete registration"
     });
   }
 });
 
-// =====================================================
-// LOGIN
-// =====================================================
+/* =====================================================
+   LOGIN
+===================================================== */
 
 app.post("/api/auth/login", async (req, res) => {
   try {
     const {
       email,
       password
-    } = req.body;
+    } = req.body || {};
 
-    if (!email || !password) {
+    const cleanEmail =
+      String(email || "")
+        .trim()
+        .toLowerCase();
+
+    if (!cleanEmail || !password) {
       return res.status(400).json({
         success: false,
         message:
@@ -549,12 +698,16 @@ app.post("/api/auth/login", async (req, res) => {
       error
     } =
       await supabase.auth.signInWithPassword({
-        email:
-          email.toLowerCase().trim(),
+        email: cleanEmail,
         password
       });
 
-    if (error || !data.user) {
+    if (error || !data?.user || !data?.session) {
+      console.error(
+        "LOGIN AUTH ERROR:",
+        error
+      );
+
       return res.status(401).json({
         success: false,
         message:
@@ -562,7 +715,12 @@ app.post("/api/auth/login", async (req, res) => {
       });
     }
 
-    const userId = data.user.id;
+    const user =
+      data.user;
+
+    /* ---------------------------------------------
+       LOAD PROFILE
+    --------------------------------------------- */
 
     const {
       data: profile,
@@ -571,9 +729,9 @@ app.post("/api/auth/login", async (req, res) => {
       await supabase
         .from("profiles")
         .select(
-          "id, first_name, surname, is_admin, is_suspended"
+          "id, first_name, surname, phone, is_admin, is_suspended"
         )
-        .eq("id", userId)
+        .eq("id", user.id)
         .maybeSingle();
 
     if (profileError) {
@@ -585,7 +743,9 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(500).json({
         success: false,
         message:
-          "Unable to verify account"
+          "Unable to verify account",
+        error:
+          profileError.message
       });
     }
 
@@ -613,126 +773,179 @@ app.post("/api/auth/login", async (req, res) => {
       });
     }
 
-    res.json({
+    /*
+      IMPORTANT:
+      Return the token in several common locations.
+
+      This prevents a frontend expecting
+      access_token/token from failing after
+      successful Supabase authentication.
+    */
+
+    return res.json({
       success: true,
       message: "Login successful",
 
-      session: data.session,
+      session:
+        data.session,
 
-      user: data.user,
+      access_token:
+        data.session.access_token,
+
+      refresh_token:
+        data.session.refresh_token,
+
+      token:
+        data.session.access_token,
+
+      expires_at:
+        data.session.expires_at,
+
+      expires_in:
+        data.session.expires_in,
+
+      user,
 
       profile,
 
-      is_admin: isAdmin
+      is_admin:
+        isAdmin
     });
-
   } catch (error) {
     console.error(
-      "Login error:",
+      "LOGIN ERROR:",
       error
     );
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message:
-        "Internal server error"
+        "Unable to login",
+      error:
+        error.message
     });
   }
 });
 
-// =====================================================
-// GET CURRENT USER
-// =====================================================
+/* =====================================================
+   CURRENT USER
+===================================================== */
 
 app.get(
   "/api/auth/me",
   authenticate,
   async (req, res) => {
-
     try {
+      const userId =
+        req.user.id;
 
-      const userId = req.user.id;
+      /* ---------------------------------------------
+         PROFILE
+      --------------------------------------------- */
 
       const {
         data: profile,
         error: profileError
-      } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", userId)
-        .maybeSingle();
+      } =
+        await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", userId)
+          .maybeSingle();
 
       if (profileError) {
-
         console.error(
-          "AUTH ME PROFILE ERROR:",
+          "ME PROFILE ERROR:",
           profileError
         );
 
         return res.status(500).json({
           success: false,
-          message: profileError.message
+          message:
+            "Unable to load profile",
+          error:
+            profileError.message
         });
-
       }
 
       if (!profile) {
         return res.status(404).json({
           success: false,
-          message: "Profile not found"
+          message:
+            "Profile not found"
         });
       }
 
-      const {
-        data: address,
-        error: addressError
-      } = await supabase
-        .from("customer_addresses")
-        .select("*")
-        .eq("user_id", userId)
-        .maybeSingle();
+      /* ---------------------------------------------
+         ADDRESS
+      --------------------------------------------- */
 
-      if (addressError) {
+      let address = null;
 
+      try {
+        const result =
+          await supabase
+            .from("customer_addresses")
+            .select("*")
+            .eq("user_id", userId)
+            .maybeSingle();
+
+        if (!result.error) {
+          address =
+            result.data || null;
+        } else {
+          console.error(
+            "ME ADDRESS ERROR:",
+            result.error
+          );
+        }
+      } catch (error) {
         console.error(
-          "AUTH ME ADDRESS ERROR:",
-          addressError
+          "ME ADDRESS EXCEPTION:",
+          error
         );
-
       }
+
+      /* ---------------------------------------------
+         ACCOUNTS
+      --------------------------------------------- */
 
       const {
         data: accounts,
         error: accountsError
-      } = await supabase
-        .from("accounts")
-        .select(`
-          *,
-          account_balances (
-            available_balance,
-            ledger_balance,
-            updated_at
-          )
-        `)
-        .eq("user_id", userId);
+      } =
+        await supabase
+          .from("accounts")
+          .select(`
+            *,
+            account_balances (
+              available_balance,
+              ledger_balance,
+              updated_at
+            )
+          `)
+          .eq("user_id", userId);
 
       if (accountsError) {
-
         console.error(
-          "AUTH ME ACCOUNTS ERROR:",
+          "ME ACCOUNTS ERROR:",
           accountsError
         );
 
         return res.status(500).json({
           success: false,
           message:
+            "Unable to load accounts",
+          error:
             accountsError.message
         });
-
       }
 
+      const accountList =
+        accounts || [];
+
       const checkingAccount =
-        (accounts || []).find(
+        accountList.find(
           account =>
             String(
               account.account_type || ""
@@ -741,9 +954,8 @@ app.get(
         );
 
       const savingsAccount =
-        (accounts || []).find(
+        accountList.find(
           account => {
-
             const type =
               String(
                 account.account_type || ""
@@ -753,7 +965,6 @@ app.get(
               type === "savings" ||
               type === "saving"
             );
-
           }
         );
 
@@ -771,58 +982,66 @@ app.get(
             ?.available_balance ?? 0
         );
 
-      const {
-        data: cards,
-        error: cardsError
-      } = await supabase
-        .from("cards")
-        .select("*")
-        .eq("user_id", userId)
-        .order("created_at", {
-          ascending: false
-        });
+      /* ---------------------------------------------
+         CARDS
 
-      if (cardsError) {
+         OPTIONAL.
 
+         A cards-table problem must NOT break login.
+      --------------------------------------------- */
+
+      let cards = [];
+
+      try {
+        const result =
+          await supabase
+            .from("cards")
+            .select("*")
+            .eq("user_id", userId)
+            .order("created_at", {
+              ascending: false
+            });
+
+        if (!result.error) {
+          cards =
+            result.data || [];
+        } else {
+          console.error(
+            "ME CARDS ERROR:",
+            result.error
+          );
+        }
+      } catch (error) {
         console.error(
-          "AUTH ME CARDS ERROR:",
-          cardsError
+          "ME CARDS EXCEPTION:",
+          error
         );
-
-        return res.status(500).json({
-          success: false,
-          message: cardsError.message
-        });
-
       }
 
       const card =
-        (cards || [])[0] || null;
+        cards[0] || null;
 
       const cardBalance =
         Number(
           card?.balance ?? 0
         );
 
-      res.json({
-
+      return res.json({
         success: true,
 
-        user: req.user,
+        user:
+          req.user,
 
         profile,
 
-        address:
-          address || null,
+        address,
 
         accounts:
-          accounts || [],
+          accountList,
 
-        cards:
-          cards || [],
+        cards,
 
         balances: {
-
           checking:
             checkingBalance,
 
@@ -831,309 +1050,288 @@ app.get(
 
           card:
             cardBalance
-
         }
-
       });
-
     } catch (error) {
-
       console.error(
         "AUTH ME ERROR:",
         error
       );
 
-      res.status(500).json({
-
+      return res.status(500).json({
         success: false,
-
         message:
-          "Unable to load user"
-
+          "Unable to load user",
+        error:
+          error.message
       });
-
     }
-
   }
 );
 
-// =====================================================
-// PASSWORD RESET REQUEST
-// =====================================================
+/* =====================================================
+   FORGOT PASSWORD
+===================================================== */
 
 app.post(
   "/api/auth/forgot-password",
   async (req, res) => {
-
     try {
+      const { email } =
+        req.body || {};
 
-      const { email } = req.body;
+      const cleanEmail =
+        String(email || "")
+          .trim()
+          .toLowerCase();
 
-      if (!email) {
+      if (!cleanEmail) {
         return res.status(400).json({
           success: false,
-          message: "Email is required"
+          message:
+            "Email is required"
         });
       }
 
       const { error } =
         await supabase.auth
           .resetPasswordForEmail(
-            email.toLowerCase().trim()
+            cleanEmail
           );
 
       if (error) {
-        console.error(error);
+        console.error(
+          "PASSWORD RESET ERROR:",
+          error
+        );
       }
 
-      res.json({
+      return res.json({
         success: true,
         message:
           "If an account exists for this email, password reset instructions have been sent."
       });
-
     } catch (error) {
+      console.error(
+        "FORGOT PASSWORD ERROR:",
+        error
+      );
 
-      console.error(error);
-
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         message:
           "Unable to process password reset"
       });
-
     }
-
   }
 );
 
-// =====================================================
-// ACCOUNTS
-// =====================================================
+/* =====================================================
+   ACCOUNTS
+===================================================== */
 
 app.get(
   "/api/accounts",
   authenticate,
   async (req, res) => {
-
     try {
-
       const {
         data,
         error
-      } = await supabase
-        .from("accounts")
-        .select(`
-          *,
-          account_balances (
-            available_balance,
-            ledger_balance,
-            updated_at
-          )
-        `)
-        .eq(
-          "user_id",
-          req.user.id
-        );
+      } =
+        await supabase
+          .from("accounts")
+          .select(`
+            *,
+            account_balances (
+              available_balance,
+              ledger_balance,
+              updated_at
+            )
+          `)
+          .eq(
+            "user_id",
+            req.user.id
+          );
 
       if (error) {
-
         return res.status(500).json({
           success: false,
-          message: error.message
+          message:
+            error.message
         });
-
       }
 
-      res.json({
+      return res.json({
         success: true,
-        accounts: data
+        accounts:
+          data || []
       });
-
     } catch (error) {
-
       console.error(error);
 
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         message:
           "Unable to load accounts"
       });
-
     }
-
   }
 );
 
-// =====================================================
-// ACCOUNT DETAILS
-// =====================================================
+/* =====================================================
+   ACCOUNT DETAILS
+===================================================== */
 
 app.get(
   "/api/accounts/:id",
   authenticate,
   async (req, res) => {
-
     try {
-
       const {
         data,
         error
-      } = await supabase
-        .from("accounts")
-        .select(`
-          *,
-          account_balances (
-            available_balance,
-            ledger_balance,
-            updated_at
+      } =
+        await supabase
+          .from("accounts")
+          .select(`
+            *,
+            account_balances (
+              available_balance,
+              ledger_balance,
+              updated_at
+            )
+          `)
+          .eq(
+            "id",
+            req.params.id
           )
-        `)
-        .eq(
-          "id",
-          req.params.id
-        )
-        .eq(
-          "user_id",
-          req.user.id
-        )
-        .maybeSingle();
+          .eq(
+            "user_id",
+            req.user.id
+          )
+          .maybeSingle();
 
       if (error || !data) {
-
         return res.status(404).json({
           success: false,
           message:
             "Account not found"
         });
-
       }
 
-      res.json({
+      return res.json({
         success: true,
-        account: data
+        account:
+          data
       });
-
     } catch (error) {
-
       console.error(error);
 
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         message:
           "Unable to load account"
       });
-
     }
-
   }
 );
 
-// =====================================================
-// TRANSACTIONS
-// =====================================================
+/* =====================================================
+   TRANSACTIONS
+===================================================== */
 
 app.get(
   "/api/transactions",
   authenticate,
   async (req, res) => {
-
     try {
-
       const {
         data,
         error
-      } = await supabase
-        .from("transactions")
-        .select("*")
-        .eq(
-          "user_id",
-          req.user.id
-        )
-        .order("created_at", {
-          ascending: false
-        });
+      } =
+        await supabase
+          .from("transactions")
+          .select("*")
+          .eq(
+            "user_id",
+            req.user.id
+          )
+          .order("created_at", {
+            ascending: false
+          });
 
       if (error) {
-
         return res.status(500).json({
           success: false,
-          message: error.message
+          message:
+            error.message
         });
-
       }
 
-      res.json({
+      return res.json({
         success: true,
-        transactions: data
+        transactions:
+          data || []
       });
-
     } catch (error) {
-
       console.error(error);
 
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         message:
           "Unable to load transactions"
       });
-
     }
-
   }
 );
 
-// =====================================================
-// BENEFICIARIES
-// =====================================================
+/* =====================================================
+   BENEFICIARIES
+===================================================== */
 
 app.get(
   "/api/beneficiaries",
   authenticate,
   async (req, res) => {
-
     try {
-
       const {
         data,
         error
-      } = await supabase
-        .from("beneficiaries")
-        .select("*")
-        .eq(
-          "user_id",
-          req.user.id
-        )
-        .order("created_at", {
-          ascending: false
-        });
+      } =
+        await supabase
+          .from("beneficiaries")
+          .select("*")
+          .eq(
+            "user_id",
+            req.user.id
+          )
+          .order("created_at", {
+            ascending: false
+          });
 
       if (error) {
-
         return res.status(500).json({
           success: false,
-          message: error.message
+          message:
+            error.message
         });
-
       }
 
-      res.json({
+      return res.json({
         success: true,
-        beneficiaries: data
+        beneficiaries:
+          data || []
       });
-
     } catch (error) {
-
       console.error(error);
 
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         message:
           "Unable to load beneficiaries"
       });
-
     }
-
   }
 );
 
@@ -1141,74 +1339,74 @@ app.post(
   "/api/beneficiaries",
   authenticate,
   async (req, res) => {
-
     try {
-
       const {
         name,
         bank_name,
         account_identifier,
         account_type
-      } = req.body;
+      } = req.body || {};
 
       if (
         !name ||
         !bank_name ||
         !account_identifier
       ) {
-
         return res.status(400).json({
           success: false,
           message:
             "Required beneficiary information is missing"
         });
-
       }
 
       const {
         data,
         error
-      } = await supabase
-        .from("beneficiaries")
-        .insert({
-          user_id: req.user.id,
-          name,
-          bank_name,
-          account_identifier,
-          account_type:
-            account_type || "checking"
-        })
-        .select()
-        .single();
+      } =
+        await supabase
+          .from("beneficiaries")
+          .insert({
+            user_id:
+              req.user.id,
+            name:
+              String(name).trim(),
+            bank_name:
+              String(bank_name).trim(),
+            account_identifier:
+              String(
+                account_identifier
+              ).trim(),
+            account_type:
+              account_type ||
+              "checking"
+          })
+          .select()
+          .single();
 
       if (error) {
-
         return res.status(400).json({
           success: false,
-          message: error.message
+          message:
+            error.message
         });
-
       }
 
-      res.status(201).json({
+      return res.status(201).json({
         success: true,
         message:
           "Beneficiary added",
-        beneficiary: data
+        beneficiary:
+          data
       });
-
     } catch (error) {
-
       console.error(error);
 
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         message:
           "Unable to create beneficiary"
       });
-
     }
-
   }
 );
 
@@ -1216,82 +1414,73 @@ app.delete(
   "/api/beneficiaries/:id",
   authenticate,
   async (req, res) => {
-
     try {
-
       const {
         error
-      } = await supabase
-        .from("beneficiaries")
-        .delete()
-        .eq(
-          "id",
-          req.params.id
-        )
-        .eq(
-          "user_id",
-          req.user.id
-        );
+      } =
+        await supabase
+          .from("beneficiaries")
+          .delete()
+          .eq(
+            "id",
+            req.params.id
+          )
+          .eq(
+            "user_id",
+            req.user.id
+          );
 
       if (error) {
-
         return res.status(400).json({
           success: false,
-          message: error.message
+          message:
+            error.message
         });
-
       }
 
-      res.json({
+      return res.json({
         success: true,
         message:
           "Beneficiary deleted"
       });
-
     } catch (error) {
-
       console.error(error);
 
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         message:
           "Unable to delete beneficiary"
       });
-
     }
-
   }
 );
 
-// =====================================================
-// TRANSFER REQUEST
-// =====================================================
+/* =====================================================
+   TRANSFERS
+===================================================== */
 
 app.post(
   "/api/transfers",
   authenticate,
   async (req, res) => {
-
     try {
-
       const {
         sender_account_id,
         beneficiary_id,
         amount
-      } = req.body;
+      } = req.body || {};
 
       if (
         !sender_account_id ||
         !beneficiary_id ||
-        !amount
+        amount === undefined ||
+        amount === null
       ) {
-
         return res.status(400).json({
           success: false,
           message:
             "Account, beneficiary and amount are required"
         });
-
       }
 
       const transferAmount =
@@ -1303,88 +1492,90 @@ app.post(
         ) ||
         transferAmount <= 0
       ) {
-
         return res.status(400).json({
           success: false,
           message:
             "Invalid transfer amount"
         });
-
       }
 
       const {
         data: account
-      } = await supabase
-        .from("accounts")
-        .select("*")
-        .eq(
-          "id",
-          sender_account_id
-        )
-        .eq(
-          "user_id",
-          req.user.id
-        )
-        .maybeSingle();
+      } =
+        await supabase
+          .from("accounts")
+          .select("*")
+          .eq(
+            "id",
+            sender_account_id
+          )
+          .eq(
+            "user_id",
+            req.user.id
+          )
+          .maybeSingle();
 
       if (!account) {
-
         return res.status(404).json({
           success: false,
           message:
             "Sender account not found"
         });
-
       }
 
       const {
         data: beneficiary
-      } = await supabase
-        .from("beneficiaries")
-        .select("*")
-        .eq(
-          "id",
-          beneficiary_id
-        )
-        .eq(
-          "user_id",
-          req.user.id
-        )
-        .eq(
-          "status",
-          "active"
-        )
-        .maybeSingle();
+      } =
+        await supabase
+          .from("beneficiaries")
+          .select("*")
+          .eq(
+            "id",
+            beneficiary_id
+          )
+          .eq(
+            "user_id",
+            req.user.id
+          )
+          .maybeSingle();
 
       if (!beneficiary) {
-
         return res.status(404).json({
           success: false,
           message:
             "Beneficiary not found"
         });
+      }
 
+      if (
+        beneficiary.status &&
+        beneficiary.status !== "active"
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Beneficiary is not active"
+        });
       }
 
       const {
         data: balance
-      } = await supabase
-        .from("account_balances")
-        .select("*")
-        .eq(
-          "account_id",
-          sender_account_id
-        )
-        .maybeSingle();
+      } =
+        await supabase
+          .from("account_balances")
+          .select("*")
+          .eq(
+            "account_id",
+            sender_account_id
+          )
+          .maybeSingle();
 
       if (!balance) {
-
         return res.status(404).json({
           success: false,
           message:
             "Account balance not found"
         });
-
       }
 
       if (
@@ -1392,13 +1583,11 @@ app.post(
           balance.available_balance
         ) < transferAmount
       ) {
-
         return res.status(400).json({
           success: false,
           message:
             "Insufficient funds"
         });
-
       }
 
       const reference =
@@ -1407,79 +1596,77 @@ app.post(
       const {
         data: transfer,
         error
-      } = await supabase
-        .from("transfers")
-        .insert({
-          sender_user_id:
-            req.user.id,
-          sender_account_id,
-          beneficiary_id,
-          amount: transferAmount,
-          currency:
-            account.currency,
-          reference,
-          status: "pending"
-        })
-        .select()
-        .single();
+      } =
+        await supabase
+          .from("transfers")
+          .insert({
+            sender_user_id:
+              req.user.id,
+            sender_account_id,
+            beneficiary_id,
+            amount:
+              transferAmount,
+            currency:
+              account.currency,
+            reference,
+            status:
+              "pending"
+          })
+          .select()
+          .single();
 
       if (error) {
-
         return res.status(400).json({
           success: false,
-          message: error.message
+          message:
+            error.message
         });
-
       }
 
-      res.status(201).json({
+      return res.status(201).json({
         success: true,
         message:
           "Transfer submitted for processing",
         transfer
       });
-
     } catch (error) {
-
       console.error(error);
 
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         message:
           "Unable to create transfer"
       });
-
     }
-
   }
 );
 
-// =====================================================
-// WITHDRAWAL REQUEST
-// =====================================================
+/* =====================================================
+   WITHDRAWALS
+===================================================== */
 
 app.post(
   "/api/withdrawals",
   authenticate,
   async (req, res) => {
-
     try {
-
       const {
         account_id,
         amount,
         destination,
         reason
-      } = req.body;
+      } = req.body || {};
 
-      if (!account_id || !amount) {
-
+      if (
+        !account_id ||
+        amount === undefined ||
+        amount === null
+      ) {
         return res.status(400).json({
           success: false,
           message:
             "Account and amount are required"
         });
-
       }
 
       const withdrawalAmount =
@@ -1491,59 +1678,55 @@ app.post(
         ) ||
         withdrawalAmount <= 0
       ) {
-
         return res.status(400).json({
           success: false,
           message:
             "Invalid withdrawal amount"
         });
-
       }
 
       const {
         data: account
-      } = await supabase
-        .from("accounts")
-        .select("*")
-        .eq(
-          "id",
-          account_id
-        )
-        .eq(
-          "user_id",
-          req.user.id
-        )
-        .maybeSingle();
+      } =
+        await supabase
+          .from("accounts")
+          .select("*")
+          .eq(
+            "id",
+            account_id
+          )
+          .eq(
+            "user_id",
+            req.user.id
+          )
+          .maybeSingle();
 
       if (!account) {
-
         return res.status(404).json({
           success: false,
           message:
             "Account not found"
         });
-
       }
 
       const {
         data: balance
-      } = await supabase
-        .from("account_balances")
-        .select("*")
-        .eq(
-          "account_id",
-          account_id
-        )
-        .maybeSingle();
+      } =
+        await supabase
+          .from("account_balances")
+          .select("*")
+          .eq(
+            "account_id",
+            account_id
+          )
+          .maybeSingle();
 
       if (!balance) {
-
         return res.status(404).json({
           success: false,
           message:
             "Account balance not found"
         });
-
       }
 
       if (
@@ -1551,599 +1734,530 @@ app.post(
           balance.available_balance
         ) < withdrawalAmount
       ) {
-
         return res.status(400).json({
           success: false,
           message:
             "Insufficient funds"
         });
-
       }
 
       const {
         data,
         error
-      } = await supabase
-        .from("withdrawals")
-        .insert({
-          user_id:
-            req.user.id,
-          account_id,
-          amount:
-            withdrawalAmount,
-          currency:
-            account.currency,
-          destination:
-            destination || null,
-          reason:
-            reason || null,
-          status:
-            "pending"
-        })
-        .select()
-        .single();
+      } =
+        await supabase
+          .from("withdrawals")
+          .insert({
+            user_id:
+              req.user.id,
+            account_id,
+            amount:
+              withdrawalAmount,
+            currency:
+              account.currency,
+            destination:
+              destination || null,
+            reason:
+              reason || null,
+            status:
+              "pending"
+          })
+          .select()
+          .single();
 
       if (error) {
-
-        return res.status(400).json({
-          success: false,
-          message: error.message
-        });
-
-      }
-
-      res.status(201).json({
-        success: true,
-        message:
-          "Withdrawal request submitted",
-        withdrawal: data
-      });
-
-    } catch (error) {
-
-      console.error(error);
-
-      res.status(500).json({
-        success: false,
-        message:
-          "Unable to create withdrawal"
-      });
-
-    }
-
-  }
-);
-
-// =====================================================
-// CUSTOMER WITHDRAWALS
-// =====================================================
-
-app.get(
-  "/api/withdrawals",
-  authenticate,
-  async (req, res) => {
-
-    try {
-
-      const {
-        data,
-        error
-      } = await supabase
-        .from("withdrawals")
-        .select("*")
-        .eq(
-          "user_id",
-          req.user.id
-        )
-        .order("created_at", {
-          ascending: false
-        });
-
-      if (error) {
-
-        return res.status(500).json({
-          success: false,
-          message: error.message
-        });
-
-      }
-
-      res.json({
-        success: true,
-        withdrawals: data
-      });
-
-    } catch (error) {
-
-      console.error(error);
-
-      res.status(500).json({
-        success: false,
-        message:
-          "Unable to load withdrawals"
-      });
-
-    }
-
-  }
-);
-
-// =====================================================
-// CARDS
-// =====================================================
-
-app.get(
-  "/api/cards",
-  authenticate,
-  async (req, res) => {
-
-    try {
-
-      const {
-        data,
-        error
-      } = await supabase
-        .from("cards")
-        .select("*")
-        .eq(
-          "user_id",
-          req.user.id
-        )
-        .order("created_at", {
-          ascending: false
-        });
-
-      if (error) {
-
-        return res.status(500).json({
-          success: false,
-          message: error.message
-        });
-
-      }
-
-      res.json({
-        success: true,
-        cards: data
-      });
-
-    } catch (error) {
-
-      console.error(error);
-
-      res.status(500).json({
-        success: false,
-        message:
-          "Unable to load cards"
-      });
-
-    }
-
-  }
-);
-
-// =====================================================
-// NOTIFICATIONS
-// =====================================================
-
-app.get(
-  "/api/notifications",
-  authenticate,
-  async (req, res) => {
-
-    try {
-
-      const {
-        data,
-        error
-      } = await supabase
-        .from("notifications")
-        .select("*")
-        .eq(
-          "user_id",
-          req.user.id
-        )
-        .order("created_at", {
-          ascending: false
-        });
-
-      if (error) {
-
-        return res.status(500).json({
-          success: false,
-          message: error.message
-        });
-
-      }
-
-      res.json({
-        success: true,
-        notifications: data
-      });
-
-    } catch (error) {
-
-      console.error(error);
-
-      res.status(500).json({
-        success: false,
-        message:
-          "Unable to load notifications"
-      });
-
-    }
-
-  }
-);
-
-// =====================================================
-// MARK NOTIFICATION AS READ
-// =====================================================
-
-app.patch(
-  "/api/notifications/:id/read",
-  authenticate,
-  async (req, res) => {
-
-    try {
-
-      const {
-        data,
-        error
-      } = await supabase
-        .from("notifications")
-        .update({
-          read_at:
-            new Date().toISOString()
-        })
-        .eq(
-          "id",
-          req.params.id
-        )
-        .eq(
-          "user_id",
-          req.user.id
-        )
-        .select()
-        .maybeSingle();
-
-      if (error || !data) {
-
-        return res.status(404).json({
-          success: false,
-          message:
-            "Notification not found"
-        });
-
-      }
-
-      res.json({
-        success: true,
-        notification: data
-      });
-
-    } catch (error) {
-
-      console.error(error);
-
-      res.status(500).json({
-        success: false,
-        message:
-          "Unable to update notification"
-      });
-
-    }
-
-  }
-);
-
-// =====================================================
-// SUPPORT - CREATE CONVERSATION
-// =====================================================
-
-app.post(
-  "/api/support/conversations",
-  authenticate,
-  async (req, res) => {
-
-    try {
-
-      const {
-        subject,
-        message
-      } = req.body;
-
-      if (!subject || !message) {
-
-        return res.status(400).json({
-          success: false,
-          message:
-            "Subject and message are required"
-        });
-
-      }
-
-      const {
-        data: conversation,
-        error: conversationError
-      } = await supabase
-        .from("support_conversations")
-        .insert({
-          user_id:
-            req.user.id,
-          subject,
-          status:
-            "open"
-        })
-        .select()
-        .single();
-
-      if (conversationError) {
-
-        return res.status(400).json({
-          success: false,
-          message:
-            conversationError.message
-        });
-
-      }
-
-      const {
-        data: supportMessage,
-        error: messageError
-      } = await supabase
-        .from("support_messages")
-        .insert({
-          conversation_id:
-            conversation.id,
-          sender_type:
-            "customer",
-          sender_id:
-            req.user.id,
-          message
-        })
-        .select()
-        .single();
-
-      if (messageError) {
-
-        return res.status(400).json({
-          success: false,
-          message:
-            messageError.message
-        });
-
-      }
-
-      res.status(201).json({
-        success: true,
-        conversation,
-        message:
-          supportMessage
-      });
-
-    } catch (error) {
-
-      console.error(error);
-
-      res.status(500).json({
-        success: false,
-        message:
-          "Unable to create support conversation"
-      });
-
-    }
-
-  }
-);
-
-// =====================================================
-// SUPPORT - CUSTOMER CONVERSATIONS
-// =====================================================
-
-app.get(
-  "/api/support/conversations",
-  authenticate,
-  async (req, res) => {
-
-    try {
-
-      const {
-        data,
-        error
-      } = await supabase
-        .from("support_conversations")
-        .select("*")
-        .eq(
-          "user_id",
-          req.user.id
-        )
-        .order("updated_at", {
-          ascending: false
-        });
-
-      if (error) {
-
-        return res.status(500).json({
-          success: false,
-          message: error.message
-        });
-
-      }
-
-      res.json({
-        success: true,
-        conversations: data
-      });
-
-    } catch (error) {
-
-      console.error(error);
-
-      res.status(500).json({
-        success: false,
-        message:
-          "Unable to load support conversations"
-      });
-
-    }
-
-  }
-);
-
-// =====================================================
-// SUPPORT - GET MESSAGES
-// =====================================================
-
-app.get(
-  "/api/support/conversations/:id/messages",
-  authenticate,
-  async (req, res) => {
-
-    try {
-
-      const {
-        data: conversation
-      } = await supabase
-        .from("support_conversations")
-        .select("id")
-        .eq(
-          "id",
-          req.params.id
-        )
-        .eq(
-          "user_id",
-          req.user.id
-        )
-        .maybeSingle();
-
-      if (!conversation) {
-
-        return res.status(404).json({
-          success: false,
-          message:
-            "Conversation not found"
-        });
-
-      }
-
-      const {
-        data,
-        error
-      } = await supabase
-        .from("support_messages")
-        .select("*")
-        .eq(
-          "conversation_id",
-          req.params.id
-        )
-        .order("created_at", {
-          ascending: true
-        });
-
-      if (error) {
-
-        return res.status(500).json({
-          success: false,
-          message: error.message
-        });
-
-      }
-
-      res.json({
-        success: true,
-        messages: data
-      });
-
-    } catch (error) {
-
-      console.error(error);
-
-      res.status(500).json({
-        success: false,
-        message:
-          "Unable to load messages"
-      });
-
-    }
-
-  }
-);
-
-// =====================================================
-// SUPPORT - SEND CUSTOMER MESSAGE
-// =====================================================
-
-app.post(
-  "/api/support/conversations/:id/messages",
-  authenticate,
-  async (req, res) => {
-
-    try {
-
-      const { message } =
-        req.body;
-
-      if (!message) {
-
-        return res.status(400).json({
-          success: false,
-          message:
-            "Message is required"
-        });
-
-      }
-
-      const {
-        data: conversation
-      } = await supabase
-        .from("support_conversations")
-        .select("id")
-        .eq(
-          "id",
-          req.params.id
-        )
-        .eq(
-          "user_id",
-          req.user.id
-        )
-        .maybeSingle();
-
-      if (!conversation) {
-
-        return res.status(404).json({
-          success: false,
-          message:
-            "Conversation not found"
-        });
-
-      }
-
-      const {
-        data,
-        error
-      } = await supabase
-        .from("support_messages")
-        .insert({
-          conversation_id:
-            req.params.id,
-          sender_type:
-            "customer",
-          sender_id:
-            req.user.id,
-          message
-        })
-        .select()
-        .single();
-
-      if (error) {
-
         return res.status(400).json({
           success: false,
           message:
             error.message
         });
+      }
 
+      return res.status(201).json({
+        success: true,
+        message:
+          "Withdrawal request submitted",
+        withdrawal:
+          data
+      });
+    } catch (error) {
+      console.error(error);
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to create withdrawal"
+      });
+    }
+  }
+);
+
+app.get(
+  "/api/withdrawals",
+  authenticate,
+  async (req, res) => {
+    try {
+      const {
+        data,
+        error
+      } =
+        await supabase
+          .from("withdrawals")
+          .select("*")
+          .eq(
+            "user_id",
+            req.user.id
+          )
+          .order("created_at", {
+            ascending: false
+          });
+
+      if (error) {
+        return res.status(500).json({
+          success: false,
+          message:
+            error.message
+        });
+      }
+
+      return res.json({
+        success: true,
+        withdrawals:
+          data || []
+      });
+    } catch (error) {
+      console.error(error);
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to load withdrawals"
+      });
+    }
+  }
+);
+
+/* =====================================================
+   CARDS
+===================================================== */
+
+app.get(
+  "/api/cards",
+  authenticate,
+  async (req, res) => {
+    try {
+      const {
+        data,
+        error
+      } =
+        await supabase
+          .from("cards")
+          .select("*")
+          .eq(
+            "user_id",
+            req.user.id
+          )
+          .order("created_at", {
+            ascending: false
+          });
+
+      if (error) {
+        return res.status(500).json({
+          success: false,
+          message:
+            error.message
+        });
+      }
+
+      return res.json({
+        success: true,
+        cards:
+          data || []
+      });
+    } catch (error) {
+      console.error(error);
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to load cards"
+      });
+    }
+  }
+);
+
+/* =====================================================
+   NOTIFICATIONS
+===================================================== */
+
+app.get(
+  "/api/notifications",
+  authenticate,
+  async (req, res) => {
+    try {
+      const {
+        data,
+        error
+      } =
+        await supabase
+          .from("notifications")
+          .select("*")
+          .eq(
+            "user_id",
+            req.user.id
+          )
+          .order("created_at", {
+            ascending: false
+          });
+
+      if (error) {
+        return res.status(500).json({
+          success: false,
+          message:
+            error.message
+        });
+      }
+
+      return res.json({
+        success: true,
+        notifications:
+          data || []
+      });
+    } catch (error) {
+      console.error(error);
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to load notifications"
+      });
+    }
+  }
+);
+
+app.patch(
+  "/api/notifications/:id/read",
+  authenticate,
+  async (req, res) => {
+    try {
+      const {
+        data,
+        error
+      } =
+        await supabase
+          .from("notifications")
+          .update({
+            read_at:
+              new Date().toISOString()
+          })
+          .eq(
+            "id",
+            req.params.id
+          )
+          .eq(
+            "user_id",
+            req.user.id
+          )
+          .select()
+          .maybeSingle();
+
+      if (error || !data) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "Notification not found"
+        });
+      }
+
+      return res.json({
+        success: true,
+        notification:
+          data
+      });
+    } catch (error) {
+      console.error(error);
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to update notification"
+      });
+    }
+  }
+);
+
+/* =====================================================
+   SUPPORT - CUSTOMER
+===================================================== */
+
+app.post(
+  "/api/support/conversations",
+  authenticate,
+  async (req, res) => {
+    try {
+      const {
+        subject,
+        message
+      } = req.body || {};
+
+      if (!subject || !message) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Subject and message are required"
+        });
+      }
+
+      const {
+        data: conversation,
+        error: conversationError
+      } =
+        await supabase
+          .from("support_conversations")
+          .insert({
+            user_id:
+              req.user.id,
+            subject:
+              String(subject).trim(),
+            status:
+              "open"
+          })
+          .select()
+          .single();
+
+      if (conversationError) {
+        return res.status(400).json({
+          success: false,
+          message:
+            conversationError.message
+        });
+      }
+
+      const {
+        data: supportMessage,
+        error: messageError
+      } =
+        await supabase
+          .from("support_messages")
+          .insert({
+            conversation_id:
+              conversation.id,
+            sender_type:
+              "customer",
+            sender_id:
+              req.user.id,
+            message:
+              String(message).trim()
+          })
+          .select()
+          .single();
+
+      if (messageError) {
+        return res.status(400).json({
+          success: false,
+          message:
+            messageError.message
+        });
+      }
+
+      return res.status(201).json({
+        success: true,
+        conversation,
+        message:
+          supportMessage
+      });
+    } catch (error) {
+      console.error(error);
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to create support conversation"
+      });
+    }
+  }
+);
+
+app.get(
+  "/api/support/conversations",
+  authenticate,
+  async (req, res) => {
+    try {
+      const {
+        data,
+        error
+      } =
+        await supabase
+          .from("support_conversations")
+          .select("*")
+          .eq(
+            "user_id",
+            req.user.id
+          )
+          .order("updated_at", {
+            ascending: false
+          });
+
+      if (error) {
+        return res.status(500).json({
+          success: false,
+          message:
+            error.message
+        });
+      }
+
+      return res.json({
+        success: true,
+        conversations:
+          data || []
+      });
+    } catch (error) {
+      console.error(error);
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to load support conversations"
+      });
+    }
+  }
+);
+
+app.get(
+  "/api/support/conversations/:id/messages",
+  authenticate,
+  async (req, res) => {
+    try {
+      const {
+        data: conversation
+      } =
+        await supabase
+          .from("support_conversations")
+          .select("id")
+          .eq(
+            "id",
+            req.params.id
+          )
+          .eq(
+            "user_id",
+            req.user.id
+          )
+          .maybeSingle();
+
+      if (!conversation) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "Conversation not found"
+        });
+      }
+
+      const {
+        data,
+        error
+      } =
+        await supabase
+          .from("support_messages")
+          .select("*")
+          .eq(
+            "conversation_id",
+            req.params.id
+          )
+          .order("created_at", {
+            ascending: true
+          });
+
+      if (error) {
+        return res.status(500).json({
+          success: false,
+          message:
+            error.message
+        });
+      }
+
+      return res.json({
+        success: true,
+        messages:
+          data || []
+      });
+    } catch (error) {
+      console.error(error);
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to load messages"
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/support/conversations/:id/messages",
+  authenticate,
+  async (req, res) => {
+    try {
+      const {
+        message
+      } = req.body || {};
+
+      if (!message) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Message is required"
+        });
+      }
+
+      const {
+        data: conversation
+      } =
+        await supabase
+          .from("support_conversations")
+          .select("id")
+          .eq(
+            "id",
+            req.params.id
+          )
+          .eq(
+            "user_id",
+            req.user.id
+          )
+          .maybeSingle();
+
+      if (!conversation) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "Conversation not found"
+        });
+      }
+
+      const {
+        data,
+        error
+      } =
+        await supabase
+          .from("support_messages")
+          .insert({
+            conversation_id:
+              req.params.id,
+            sender_type:
+              "customer",
+            sender_id:
+              req.user.id,
+            message:
+              String(message).trim()
+          })
+          .select()
+          .single();
+
+      if (error) {
+        return res.status(400).json({
+          success: false,
+          message:
+            error.message
+        });
       }
 
       await supabase
@@ -2163,57 +2277,65 @@ app.post(
           req.user.id
         );
 
-      res.status(201).json({
+      return res.status(201).json({
         success: true,
-        message: data
+        message:
+          data
       });
-
     } catch (error) {
-
       console.error(error);
 
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         message:
           "Unable to send message"
       });
-
     }
-
   }
 );
 
-// =====================================================
-// ADMIN - DASHBOARD STATS
-// =====================================================
+/* =====================================================
+   ADMIN STATS
+===================================================== */
 
 app.get(
   "/api/admin/stats",
   authenticateAdmin,
   async (req, res) => {
-
     try {
+      const {
+        count: users,
+        error: usersError
+      } =
+        await supabase
+          .from("profiles")
+          .select("*", {
+            count: "exact",
+            head: true
+          });
+
+      if (usersError) {
+        throw usersError;
+      }
 
       const {
-        count: users
-      } = await supabase
-        .from("profiles")
-        .select("*", {
-          count: "exact",
-          head: true
-        });
+        count: accounts,
+        error: accountsError
+      } =
+        await supabase
+          .from("accounts")
+          .select("*", {
+            count: "exact",
+            head: true
+          });
+
+      if (accountsError) {
+        throw accountsError;
+      }
 
       const {
-        count: accounts
-      } = await supabase
-        .from("accounts")
-        .select("*", {
-          count: "exact",
-          head: true
-        });
-
-      const {
-        count: pendingWithdrawals
+        count: pendingWithdrawals,
+        error: withdrawalsError
       } =
         await supabase
           .from("withdrawals")
@@ -2226,8 +2348,13 @@ app.get(
             "pending"
           );
 
+      if (withdrawalsError) {
+        throw withdrawalsError;
+      }
+
       const {
-        count: pendingTransfers
+        count: pendingTransfers,
+        error: transfersError
       } =
         await supabase
           .from("transfers")
@@ -2243,11 +2370,14 @@ app.get(
             ]
           );
 
-      res.json({
+      if (transfersError) {
+        throw transfersError;
+      }
+
+      return res.json({
         success: true,
 
         stats: {
-
           users:
             users || 0,
 
@@ -2259,71 +2389,57 @@ app.get(
 
           pending_transfers:
             pendingTransfers || 0
-
         }
-
       });
-
     } catch (error) {
+      console.error(
+        "ADMIN STATS ERROR:",
+        error
+      );
 
-      console.error(error);
-
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         message:
-          "Unable to load admin statistics"
+          "Unable to load admin statistics",
+        error:
+          error.message
       });
-
     }
-
   }
 );
 
-// =====================================================
-// ADMIN - GET ALL CUSTOMERS / USERS
-// =====================================================
+/* =====================================================
+   ADMIN USERS
+===================================================== */
 
 app.get(
   "/api/admin/users",
   authenticateAdmin,
   async (req, res) => {
-
     try {
-
       console.log(
-        "=========================================="
+        "ADMIN USERS REQUEST:",
+        req.user.email
       );
 
-      console.log(
-        "ADMIN USERS REQUEST"
-      );
-
-      console.log(
-        "Admin:",
-        req.user?.email
-      );
-
-      // -------------------------------------------------
-      // 1. GET ALL PROFILES
-      // -------------------------------------------------
+      /* ---------------------------------------------
+         PROFILES
+      --------------------------------------------- */
 
       const {
         data: profiles,
         error: profilesError
-      } = await supabase
-        .from("profiles")
-        .select("*")
-        .order(
-          "created_at",
-          {
+      } =
+        await supabase
+          .from("profiles")
+          .select("*")
+          .order("created_at", {
             ascending: false
-          }
-        );
+          });
 
       if (profilesError) {
-
         console.error(
-          "PROFILES QUERY ERROR:",
+          "ADMIN USERS PROFILE ERROR:",
           profilesError
         );
 
@@ -2334,66 +2450,23 @@ app.get(
           error:
             profilesError.message
         });
-
       }
 
-      console.log(
-        "TOTAL PROFILES:",
-        profiles?.length || 0
-      );
-
-      // -------------------------------------------------
-      // 2. SHOW ADMIN VALUES FOR DEBUGGING
-      // -------------------------------------------------
-
-      console.log(
-        "PROFILE ADMIN VALUES:",
-        (profiles || []).map(
-          profile => ({
-            id: profile.id,
-            email: profile.email,
-            first_name:
-              profile.first_name,
-            is_admin:
-              profile.is_admin,
-            is_admin_type:
-              typeof profile.is_admin
-          })
-        )
-      );
-
-      // -------------------------------------------------
-      // 3. FILTER ADMIN ACCOUNTS
-      // -------------------------------------------------
-
-      const customerProfiles =
-        (profiles || []).filter(
-          profile =>
-            !isAdminValue(
-              profile.is_admin
-            )
-        );
-
-      console.log(
-        "CUSTOMER PROFILES:",
-        customerProfiles.length
-      );
-
-      // -------------------------------------------------
-      // 4. GET ACCOUNTS
-      // -------------------------------------------------
+      /* ---------------------------------------------
+         ACCOUNTS
+      --------------------------------------------- */
 
       const {
         data: accounts,
         error: accountsError
-      } = await supabase
-        .from("accounts")
-        .select("*");
+      } =
+        await supabase
+          .from("accounts")
+          .select("*");
 
       if (accountsError) {
-
         console.error(
-          "ACCOUNTS QUERY ERROR:",
+          "ADMIN USERS ACCOUNTS ERROR:",
           accountsError
         );
 
@@ -2404,24 +2477,23 @@ app.get(
           error:
             accountsError.message
         });
-
       }
 
-      // -------------------------------------------------
-      // 5. GET ACCOUNT BALANCES
-      // -------------------------------------------------
+      /* ---------------------------------------------
+         BALANCES
+      --------------------------------------------- */
 
       const {
-        data: accountBalances,
+        data: balances,
         error: balancesError
-      } = await supabase
-        .from("account_balances")
-        .select("*");
+      } =
+        await supabase
+          .from("account_balances")
+          .select("*");
 
       if (balancesError) {
-
         console.error(
-          "ACCOUNT BALANCES QUERY ERROR:",
+          "ADMIN USERS BALANCE ERROR:",
           balancesError
         );
 
@@ -2432,119 +2504,104 @@ app.get(
           error:
             balancesError.message
         });
-
       }
 
-      // -------------------------------------------------
-      // 6. GET AUTH USERS
-      // -------------------------------------------------
+      /* ---------------------------------------------
+         AUTH USERS
+      --------------------------------------------- */
 
       let authUsers = [];
 
       try {
-
         const {
-          data: authUsersData,
-          error: authUsersError
+          data: authData,
+          error: authError
         } =
-          await supabase.auth.admin
-            .listUsers({
-              page: 1,
-              perPage: 1000
-            });
+          await supabase.auth.admin.listUsers({
+            page: 1,
+            perPage: 1000
+          });
 
-        if (authUsersError) {
-
+        if (authError) {
           console.error(
-            "AUTH USERS QUERY ERROR:",
-            authUsersError
+            "ADMIN AUTH USERS ERROR:",
+            authError
           );
-
         } else {
-
           authUsers =
-            authUsersData?.users || [];
-
+            authData?.users || [];
         }
-
-      } catch (authError) {
-
+      } catch (error) {
         console.error(
-          "AUTH USERS EXCEPTION:",
-          authError
+          "ADMIN AUTH USERS EXCEPTION:",
+          error
         );
-
       }
 
-      // -------------------------------------------------
-      // 7. LOOKUP MAPS
-      // -------------------------------------------------
+      /* ---------------------------------------------
+         MAPS
+      --------------------------------------------- */
 
-      const authUserMap =
+      const authMap =
         new Map();
 
-      authUsers.forEach(
-        user => {
-          authUserMap.set(
-            user.id,
-            user
-          );
-        }
-      );
+      authUsers.forEach(user => {
+        authMap.set(
+          user.id,
+          user
+        );
+      });
 
       const accountMap =
         new Map();
 
       (accounts || []).forEach(
         account => {
-
           if (
             account.user_id &&
             !accountMap.has(
               account.user_id
             )
           ) {
-
             accountMap.set(
               account.user_id,
               account
             );
-
           }
-
         }
       );
 
       const balanceMap =
         new Map();
 
-      (accountBalances || []).forEach(
+      (balances || []).forEach(
         balance => {
-
           if (
             balance.account_id
           ) {
-
             balanceMap.set(
               balance.account_id,
               balance
             );
-
           }
-
         }
       );
 
-      // -------------------------------------------------
-      // 8. BUILD CUSTOMER LIST
-      // -------------------------------------------------
+      /* ---------------------------------------------
+         CUSTOMERS ONLY
+      --------------------------------------------- */
 
       const users =
-        customerProfiles.map(
-          profile => {
-
+        (profiles || [])
+          .filter(
+            profile =>
+              !isAdminValue(
+                profile.is_admin
+              )
+          )
+          .map(profile => {
             const authUser =
-              authUserMap.get(
+              authMap.get(
                 profile.id
               );
 
@@ -2571,18 +2628,18 @@ app.get(
             const fullName =
               `${firstName} ${surname}`
                 .trim() ||
-              profile.full_name ||
               "Unnamed User";
 
-            const availableBalance =
-              accountBalance
-                ?.available_balance ??
-              accountBalance
-                ?.balance ??
-              0;
+            const balance =
+              Number(
+                accountBalance
+                  ?.available_balance ??
+                  accountBalance
+                    ?.balance ??
+                  0
+              );
 
             return {
-
               id:
                 profile.id,
 
@@ -2604,10 +2661,7 @@ app.get(
                 profile.phone ||
                 "",
 
-              balance:
-                Number(
-                  availableBalance
-                ) || 0,
+              balance,
 
               is_suspended:
                 isSuspendedValue(
@@ -2621,215 +2675,166 @@ app.get(
               account_balance:
                 accountBalance ||
                 null
-
             };
-
-          }
-        );
+          });
 
       console.log(
-        "FINAL USERS SENT TO ADMIN:",
+        "ADMIN USERS RETURNED:",
         users.length
       );
 
-      console.log(
-        "=========================================="
-      );
-
-      return res.status(200).json({
-
+      return res.json({
         success: true,
-
         users
-
       });
-
     } catch (error) {
-
       console.error(
-        "GET /api/admin/users ERROR:",
+        "ADMIN USERS ERROR:",
         error
       );
 
       return res.status(500).json({
-
         success: false,
-
         message:
           "Unable to load users",
-
         error:
           error.message
-
       });
-
     }
-
   }
 );
 
-// =====================================================
-// ADMIN - GET SINGLE USER
-// =====================================================
+/* =====================================================
+   ADMIN SINGLE USER
+===================================================== */
 
 app.get(
   "/api/admin/users/:id",
   authenticateAdmin,
   async (req, res) => {
-
     try {
-
       const userId =
         req.params.id;
 
       const {
         data: profile,
         error: profileError
-      } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq(
-          "id",
-          userId
-        )
-        .maybeSingle();
+      } =
+        await supabase
+          .from("profiles")
+          .select("*")
+          .eq(
+            "id",
+            userId
+          )
+          .maybeSingle();
 
       if (profileError) {
-
-        console.error(
-          "ADMIN USER PROFILE ERROR:",
-          profileError
-        );
-
         return res.status(500).json({
           success: false,
           message:
             profileError.message
         });
-
       }
 
       if (!profile) {
-
         return res.status(404).json({
           success: false,
           message:
             "User not found"
         });
-
       }
 
-      const {
-        data: authUserData,
-        error: authUserError
-      } =
-        await supabase.auth.admin
-          .getUserById(
-            userId
-          );
-
-      if (authUserError) {
-
-        console.error(
-          "ADMIN USER AUTH ERROR:",
-          authUserError
-        );
-
-        return res.status(500).json({
-          success: false,
-          message:
-            authUserError.message
-        });
-
-      }
-
-      const authUser =
-        authUserData?.user ||
+      let authUser =
         null;
 
-      const {
-        data: address,
-        error: addressError
-      } = await supabase
-        .from("customer_addresses")
-        .select("*")
-        .eq(
-          "user_id",
-          userId
-        )
-        .maybeSingle();
+      try {
+        const {
+          data,
+          error
+        } =
+          await supabase.auth.admin
+            .getUserById(
+              userId
+            );
 
-      if (addressError) {
-
+        if (!error) {
+          authUser =
+            data?.user ||
+            null;
+        }
+      } catch (error) {
         console.error(
-          "ADMIN USER ADDRESS ERROR:",
-          addressError
+          "AUTH USER LOOKUP ERROR:",
+          error
         );
-
       }
+
+      const {
+        data: address
+      } =
+        await supabase
+          .from("customer_addresses")
+          .select("*")
+          .eq(
+            "user_id",
+            userId
+          )
+          .maybeSingle();
 
       const {
         data: accounts,
         error: accountsError
-      } = await supabase
-        .from("accounts")
-        .select(`
-          id,
-          user_id,
-          account_number,
-          account_type,
-          currency,
-          status,
-          created_at,
-          account_balances (
-            available_balance,
-            ledger_balance
-          )
-        `)
-        .eq(
-          "user_id",
-          userId
-        );
+      } =
+        await supabase
+          .from("accounts")
+          .select(`
+            id,
+            user_id,
+            account_number,
+            account_type,
+            currency,
+            status,
+            created_at,
+            account_balances (
+              available_balance,
+              ledger_balance
+            )
+          `)
+          .eq(
+            "user_id",
+            userId
+          );
 
       if (accountsError) {
-
-        console.error(
-          "ADMIN USER ACCOUNTS ERROR:",
-          accountsError
-        );
-
         return res.status(500).json({
           success: false,
           message:
             accountsError.message
         });
-
       }
 
-      const {
-        data: cards,
-        error: cardsError
-      } = await supabase
-        .from("cards")
-        .select("*")
-        .eq(
-          "user_id",
-          userId
-        );
+      let cards = [];
 
-      if (cardsError) {
+      try {
+        const result =
+          await supabase
+            .from("cards")
+            .select("*")
+            .eq(
+              "user_id",
+              userId
+            );
 
+        if (!result.error) {
+          cards =
+            result.data || [];
+        }
+      } catch (error) {
         console.error(
-          "ADMIN USER CARDS ERROR:",
-          cardsError
+          "ADMIN CARDS ERROR:",
+          error
         );
-
-        return res.status(500).json({
-          success: false,
-          message:
-            cardsError.message
-        });
-
       }
 
       const checkingAccount =
@@ -2844,7 +2849,6 @@ app.get(
       const savingsAccount =
         (accounts || []).find(
           account => {
-
             const type =
               String(
                 account.account_type || ""
@@ -2854,7 +2858,6 @@ app.get(
               type === "savings" ||
               type === "saving"
             );
-
           }
         );
 
@@ -2872,32 +2875,24 @@ app.get(
             ?.available_balance ?? 0
         );
 
-      const card =
-        (cards || [])[0] ||
-        null;
-
       const cardBalance =
         Number(
-          card?.balance ?? 0
+          cards[0]?.balance ?? 0
         );
 
-      const fullName = [
+      const fullName =
+        [
+          profile.first_name,
+          profile.surname
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .trim();
 
-        profile.first_name,
-
-        profile.surname
-
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .trim();
-
-      res.json({
-
+      return res.json({
         success: true,
 
         profile: {
-
           ...profile,
 
           full_name:
@@ -2908,7 +2903,6 @@ app.get(
             authUser?.email ||
             profile.email ||
             "No email"
-
         },
 
         address:
@@ -2917,11 +2911,9 @@ app.get(
         accounts:
           accounts || [],
 
-        cards:
-          cards || [],
+        cards,
 
         balances: {
-
           checking:
             checkingBalance,
 
@@ -2930,43 +2922,34 @@ app.get(
 
           card:
             cardBalance
-
         }
-
       });
-
     } catch (error) {
-
       console.error(
         "ADMIN USER DETAILS ERROR:",
         error
       );
 
-      res.status(500).json({
-
+      return res.status(500).json({
         success: false,
-
         message:
-          "Unable to load user"
-
+          "Unable to load user",
+        error:
+          error.message
       });
-
     }
-
   }
 );
 
-// =====================================================
-// ADMIN - UPDATE USER ACCOUNT BALANCES
-// =====================================================
+/* =====================================================
+   ADMIN BALANCE UPDATE
+===================================================== */
 
 app.put(
   "/api/admin/users/:id/balances",
   authenticateAdmin,
   async (req, res) => {
-
     try {
-
       const userId =
         req.params.id;
 
@@ -2974,35 +2957,27 @@ app.put(
         checking_balance,
         savings_balance,
         card_balance
-      } = req.body;
+      } = req.body || {};
 
       const checking =
-        Number(
-          checking_balance
-        );
+        Number(checking_balance);
 
       const savings =
-        Number(
-          savings_balance
-        );
+        Number(savings_balance);
 
       const card =
-        Number(
-          card_balance
-        );
+        Number(card_balance);
 
       if (
         !Number.isFinite(checking) ||
         !Number.isFinite(savings) ||
         !Number.isFinite(card)
       ) {
-
         return res.status(400).json({
           success: false,
           message:
             "Invalid balance amount"
         });
-
       }
 
       if (
@@ -3010,52 +2985,42 @@ app.put(
         savings < 0 ||
         card < 0
       ) {
-
         return res.status(400).json({
           success: false,
           message:
             "Balance cannot be negative"
         });
-
       }
 
       const {
         data: profile,
         error: profileError
-      } = await supabase
-        .from("profiles")
-        .select(
-          "id, is_admin"
-        )
-        .eq(
-          "id",
-          userId
-        )
-        .maybeSingle();
+      } =
+        await supabase
+          .from("profiles")
+          .select(
+            "id, is_admin"
+          )
+          .eq(
+            "id",
+            userId
+          )
+          .maybeSingle();
 
       if (profileError) {
-
-        console.error(
-          "BALANCE UPDATE PROFILE ERROR:",
-          profileError
-        );
-
         return res.status(500).json({
           success: false,
           message:
             profileError.message
         });
-
       }
 
       if (!profile) {
-
         return res.status(404).json({
           success: false,
           message:
             "User not found"
         });
-
       }
 
       if (
@@ -3063,42 +3028,34 @@ app.put(
           profile.is_admin
         )
       ) {
-
         return res.status(403).json({
           success: false,
           message:
             "Administrator balances cannot be modified here"
         });
-
       }
 
       const {
         data: accounts,
         error: accountsError
-      } = await supabase
-        .from("accounts")
-        .select("*")
-        .eq(
-          "user_id",
-          userId
-        );
+      } =
+        await supabase
+          .from("accounts")
+          .select("*")
+          .eq(
+            "user_id",
+            userId
+          );
 
       if (accountsError) {
-
-        console.error(
-          "BALANCE UPDATE ACCOUNTS ERROR:",
-          accountsError
-        );
-
         return res.status(500).json({
           success: false,
           message:
             accountsError.message
         });
-
       }
 
-      let checkingAccount =
+      const checkingAccount =
         (accounts || []).find(
           account =>
             String(
@@ -3110,7 +3067,6 @@ app.put(
       let savingsAccount =
         (accounts || []).find(
           account => {
-
             const type =
               String(
                 account.account_type || ""
@@ -3120,1073 +3076,833 @@ app.put(
               type === "savings" ||
               type === "saving"
             );
-
           }
         );
 
       if (!checkingAccount) {
-
         return res.status(400).json({
           success: false,
           message:
             "Checking account not found"
         });
-
       }
 
       const {
-        error: checkingUpdateError
-      } = await supabase
-        .from("account_balances")
-        .update({
-
-          available_balance:
-            checking,
-
-          ledger_balance:
-            checking,
-
-          updated_at:
-            new Date().toISOString()
-
-        })
-        .eq(
-          "account_id",
-          checkingAccount.id
-        );
-
-      if (checkingUpdateError) {
-
-        console.error(
-          "CHECKING BALANCE UPDATE ERROR:",
-          checkingUpdateError
-        );
-
-        return res.status(500).json({
-          success: false,
-          message:
-            "Unable to update checking balance: " +
-            checkingUpdateError.message
-        });
-
-      }
-
-      if (savingsAccount) {
-
-        const {
-          error: savingsUpdateError
-        } = await supabase
+        error: checkingError
+      } =
+        await supabase
           .from("account_balances")
           .update({
-
             available_balance:
-              savings,
-
+              checking,
             ledger_balance:
-              savings,
-
+              checking,
             updated_at:
               new Date().toISOString()
-
           })
           .eq(
             "account_id",
-            savingsAccount.id
+            checkingAccount.id
           );
 
-        if (savingsUpdateError) {
+      if (checkingError) {
+        return res.status(500).json({
+          success: false,
+          message:
+            checkingError.message
+        });
+      }
 
-          console.error(
-            "SAVINGS BALANCE UPDATE ERROR:",
-            savingsUpdateError
-          );
+      if (savingsAccount) {
+        const {
+          error: savingsError
+        } =
+          await supabase
+            .from("account_balances")
+            .update({
+              available_balance:
+                savings,
+              ledger_balance:
+                savings,
+              updated_at:
+                new Date().toISOString()
+            })
+            .eq(
+              "account_id",
+              savingsAccount.id
+            );
 
+        if (savingsError) {
           return res.status(500).json({
             success: false,
             message:
-              "Unable to update savings balance: " +
-              savingsUpdateError.message
+              savingsError.message
           });
-
         }
-
       } else {
-
-        const savingsAccountNumber =
+        const accountNumber =
           await generateAccountNumber();
 
         const {
-          data: newSavingsAccount,
+          data: newSavings,
           error: savingsAccountError
-        } = await supabase
-          .from("accounts")
-          .insert({
+        } =
+          await supabase
+            .from("accounts")
+            .insert({
+              user_id:
+                userId,
+              account_number:
+                accountNumber,
+              account_type:
+                "savings",
+              currency:
+                "USD",
+              status:
+                "active"
+            })
+            .select()
+            .single();
 
-            user_id:
-              userId,
-
-            account_number:
-              savingsAccountNumber,
-
-            account_type:
-              "savings",
-
-            currency:
-              "USD",
-
-            status:
-              "active"
-
-          })
-          .select()
-          .single();
-
-        if (savingsAccountError) {
-
-          console.error(
-            "SAVINGS ACCOUNT CREATION ERROR:",
-            savingsAccountError
-          );
-
+        if (
+          savingsAccountError ||
+          !newSavings
+        ) {
           return res.status(500).json({
             success: false,
             message:
-              "Unable to create savings account: " +
-              savingsAccountError.message
+              savingsAccountError?.message ||
+              "Unable to create savings account"
           });
-
         }
+
+        savingsAccount =
+          newSavings;
 
         const {
           error: savingsBalanceError
-        } = await supabase
-          .from("account_balances")
-          .insert({
-
-            account_id:
-              newSavingsAccount.id,
-
-            available_balance:
-              savings,
-
-            ledger_balance:
-              savings,
-
-            updated_at:
-              new Date().toISOString()
-
-          });
+        } =
+          await supabase
+            .from("account_balances")
+            .insert({
+              account_id:
+                newSavings.id,
+              available_balance:
+                savings,
+              ledger_balance:
+                savings
+            });
 
         if (savingsBalanceError) {
-
-          console.error(
-            "SAVINGS BALANCE CREATION ERROR:",
-            savingsBalanceError
-          );
-
           return res.status(500).json({
             success: false,
             message:
-              "Unable to create savings balance: " +
               savingsBalanceError.message
           });
-
         }
-
       }
 
-      const {
-        data: cards,
-        error: cardsError
-      } = await supabase
-        .from("cards")
-        .select("id")
-        .eq(
-          "user_id",
-          userId
-        );
+      /* ---------------------------------------------
+         CARD BALANCE
+      --------------------------------------------- */
 
-      if (cardsError) {
-
-        console.error(
-          "CARD LOOKUP ERROR:",
-          cardsError
-        );
-
-        return res.status(500).json({
-          success: false,
-          message:
-            "Unable to check card: " +
-            cardsError.message
-        });
-
-      }
-
-      if (
-        cards &&
-        cards.length > 0
-      ) {
-
+      try {
         const {
-          error: cardUpdateError
-        } = await supabase
-          .from("cards")
-          .update({
-            balance: card
-          })
-          .eq(
-            "user_id",
-            userId
-          );
-
-        if (cardUpdateError) {
-
-          console.error(
-            "CARD BALANCE UPDATE ERROR:",
-            cardUpdateError
-          );
-
-          return res.status(500).json({
-            success: false,
-            message:
-              "Unable to update card balance: " +
-              cardUpdateError.message
-          });
-
-        }
-
-      }
-
-      const {
-        data: finalAccounts,
-        error: finalAccountsError
-      } = await supabase
-        .from("accounts")
-        .select(`
-          id,
-          account_type,
-          account_balances (
-            available_balance,
-            ledger_balance,
-            updated_at
-          )
-        `)
-        .eq(
-          "user_id",
-          userId
-        );
-
-      if (finalAccountsError) {
-
-        console.error(
-          "FINAL BALANCE CHECK ERROR:",
-          finalAccountsError
-        );
-
-        return res.status(500).json({
-          success: false,
-          message:
-            finalAccountsError.message
-        });
-
-      }
-
-      const finalChecking =
-        (finalAccounts || []).find(
-          account =>
-            String(
-              account.account_type || ""
-            ).toLowerCase() ===
-            "checking"
-        );
-
-      const finalSavings =
-        (finalAccounts || []).find(
-          account => {
-
-            const type =
-              String(
-                account.account_type || ""
-              ).toLowerCase();
-
-            return (
-              type === "savings" ||
-              type === "saving"
+          data: cards
+        } =
+          await supabase
+            .from("cards")
+            .select("id")
+            .eq(
+              "user_id",
+              userId
             );
 
-          }
+        if (
+          cards &&
+          cards.length > 0
+        ) {
+          await supabase
+            .from("cards")
+            .update({
+              balance:
+                card
+            })
+            .eq(
+              "user_id",
+              userId
+            );
+        }
+      } catch (error) {
+        console.error(
+          "CARD UPDATE ERROR:",
+          error
         );
+      }
 
-      const {
-        data: finalCards
-      } = await supabase
-        .from("cards")
-        .select("balance")
-        .eq(
-          "user_id",
-          userId
-        );
-
-      const finalCard =
-        finalCards?.[0]?.balance ??
-        0;
-
-      res.json({
-
+      return res.json({
         success: true,
-
         message:
           "User balances updated successfully",
-
         balances: {
-
-          checking:
-            Number(
-              finalChecking
-                ?.account_balances?.[0]
-                ?.available_balance ??
-              0
-            ),
-
-          savings:
-            Number(
-              finalSavings
-                ?.account_balances?.[0]
-                ?.available_balance ??
-              0
-            ),
-
-          card:
-            Number(
-              finalCard
-            )
-
+          checking,
+          savings,
+          card
         }
-
       });
-
     } catch (error) {
-
       console.error(
         "ADMIN BALANCE UPDATE ERROR:",
         error
       );
 
-      res.status(500).json({
-
+      return res.status(500).json({
         success: false,
-
         message:
-          "Unable to update user balances"
-
+          "Unable to update user balances",
+        error:
+          error.message
       });
-
     }
-
   }
 );
 
-// =====================================================
-// ADMIN - WITHDRAWALS
-// =====================================================
+/* =====================================================
+   ADMIN WITHDRAWALS
+===================================================== */
 
 app.get(
   "/api/admin/withdrawals",
   authenticateAdmin,
   async (req, res) => {
-
     try {
-
       const {
         data,
         error
-      } = await supabase
-        .from("withdrawals")
-        .select("*")
-        .order("created_at", {
-          ascending: false
-        });
+      } =
+        await supabase
+          .from("withdrawals")
+          .select("*")
+          .order("created_at", {
+            ascending: false
+          });
 
       if (error) {
-
         return res.status(500).json({
           success: false,
-          message: error.message
+          message:
+            error.message
         });
-
       }
 
-      res.json({
+      return res.json({
         success: true,
-        withdrawals: data
+        withdrawals:
+          data || []
       });
-
     } catch (error) {
-
       console.error(error);
 
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         message:
           "Unable to load withdrawals"
       });
-
     }
-
   }
 );
 
-// =====================================================
-// ADMIN - APPROVE WITHDRAWAL
-// =====================================================
+/* =====================================================
+   ADMIN APPROVE WITHDRAWAL
+===================================================== */
 
 app.patch(
   "/api/admin/withdrawals/:id/approve",
   authenticateAdmin,
   async (req, res) => {
-
     try {
-
       const withdrawalId =
         req.params.id;
 
       const {
-        data: withdrawal
-      } = await supabase
-        .from("withdrawals")
-        .select("*")
-        .eq(
-          "id",
-          withdrawalId
-        )
-        .maybeSingle();
+        data: withdrawal,
+        error: lookupError
+      } =
+        await supabase
+          .from("withdrawals")
+          .select("*")
+          .eq(
+            "id",
+            withdrawalId
+          )
+          .maybeSingle();
+
+      if (lookupError) {
+        return res.status(500).json({
+          success: false,
+          message:
+            lookupError.message
+        });
+      }
 
       if (!withdrawal) {
-
         return res.status(404).json({
           success: false,
           message:
             "Withdrawal not found"
         });
-
       }
 
       if (
         withdrawal.status !==
         "pending"
       ) {
-
         return res.status(400).json({
           success: false,
           message:
             "Withdrawal is no longer pending"
         });
-
       }
 
       const {
         data,
         error
-      } = await supabase
-        .from("withdrawals")
-        .update({
-
-          status:
-            "approved",
-
-          reviewed_by:
-            req.user.id,
-
-          reviewed_at:
-            new Date().toISOString()
-
-        })
-        .eq(
-          "id",
-          withdrawalId
-        )
-        .eq(
-          "status",
-          "pending"
-        )
-        .select()
-        .single();
+      } =
+        await supabase
+          .from("withdrawals")
+          .update({
+            status:
+              "approved",
+            reviewed_by:
+              req.user.id,
+            reviewed_at:
+              new Date().toISOString()
+          })
+          .eq(
+            "id",
+            withdrawalId
+          )
+          .eq(
+            "status",
+            "pending"
+          )
+          .select()
+          .single();
 
       if (error) {
-
         return res.status(400).json({
           success: false,
           message:
             error.message
         });
-
       }
 
-      await supabase
-        .from("notifications")
-        .insert({
+      try {
+        await supabase
+          .from("notifications")
+          .insert({
+            user_id:
+              withdrawal.user_id,
+            title:
+              "Withdrawal Approved",
+            message:
+              `Your withdrawal request for ${withdrawal.amount} ${withdrawal.currency} has been approved.`,
+            type:
+              "transaction"
+          });
+      } catch (error) {
+        console.error(
+          "WITHDRAWAL NOTIFICATION ERROR:",
+          error
+        );
+      }
 
-          user_id:
-            withdrawal.user_id,
+      try {
+        await supabase
+          .from("audit_logs")
+          .insert({
+            admin_id:
+              req.user.id,
+            action:
+              "approve_withdrawal",
+            target_type:
+              "withdrawal",
+            target_id:
+              withdrawal.id,
+            description:
+              `Approved withdrawal ${withdrawal.id}`
+          });
+      } catch (error) {
+        console.error(
+          "AUDIT LOG ERROR:",
+          error
+        );
+      }
 
-          title:
-            "Withdrawal Approved",
-
-          message:
-            `Your withdrawal request for ${withdrawal.amount} ${withdrawal.currency} has been approved.`,
-
-          type:
-            "transaction"
-
-        });
-
-      await supabase
-        .from("audit_logs")
-        .insert({
-
-          admin_id:
-            req.user.id,
-
-          action:
-            "approve_withdrawal",
-
-          target_type:
-            "withdrawal",
-
-          target_id:
-            withdrawal.id,
-
-          description:
-            `Approved withdrawal ${withdrawal.id}`
-
-        });
-
-      res.json({
-
-        success:
-          true,
-
+      return res.json({
+        success: true,
         message:
           "Withdrawal approved",
-
         withdrawal:
           data
-
       });
-
     } catch (error) {
-
       console.error(error);
 
-      res.status(500).json({
-
-        success:
-          false,
-
+      return res.status(500).json({
+        success: false,
         message:
           "Unable to approve withdrawal"
-
       });
-
     }
-
   }
 );
 
-// =====================================================
-// ADMIN - REJECT WITHDRAWAL
-// =====================================================
+/* =====================================================
+   ADMIN REJECT WITHDRAWAL
+===================================================== */
 
 app.patch(
   "/api/admin/withdrawals/:id/reject",
   authenticateAdmin,
   async (req, res) => {
-
     try {
-
       const withdrawalId =
         req.params.id;
 
       const {
-        data: withdrawal
-      } = await supabase
-        .from("withdrawals")
-        .select("*")
-        .eq(
-          "id",
-          withdrawalId
-        )
-        .maybeSingle();
+        data: withdrawal,
+        error: lookupError
+      } =
+        await supabase
+          .from("withdrawals")
+          .select("*")
+          .eq(
+            "id",
+            withdrawalId
+          )
+          .maybeSingle();
+
+      if (lookupError) {
+        return res.status(500).json({
+          success: false,
+          message:
+            lookupError.message
+        });
+      }
 
       if (!withdrawal) {
-
         return res.status(404).json({
           success: false,
           message:
             "Withdrawal not found"
         });
-
       }
 
       if (
         withdrawal.status !==
         "pending"
       ) {
-
         return res.status(400).json({
           success: false,
           message:
             "Withdrawal is no longer pending"
         });
-
       }
 
       const {
         data,
         error
-      } = await supabase
-        .from("withdrawals")
-        .update({
-
-          status:
-            "rejected",
-
-          reviewed_by:
-            req.user.id,
-
-          reviewed_at:
-            new Date().toISOString()
-
-        })
-        .eq(
-          "id",
-          withdrawalId
-        )
-        .eq(
-          "status",
-          "pending"
-        )
-        .select()
-        .single();
+      } =
+        await supabase
+          .from("withdrawals")
+          .update({
+            status:
+              "rejected",
+            reviewed_by:
+              req.user.id,
+            reviewed_at:
+              new Date().toISOString()
+          })
+          .eq(
+            "id",
+            withdrawalId
+          )
+          .eq(
+            "status",
+            "pending"
+          )
+          .select()
+          .single();
 
       if (error) {
-
         return res.status(400).json({
           success: false,
           message:
             error.message
         });
-
       }
 
-      await supabase
-        .from("notifications")
-        .insert({
+      try {
+        await supabase
+          .from("notifications")
+          .insert({
+            user_id:
+              withdrawal.user_id,
+            title:
+              "Withdrawal Rejected",
+            message:
+              `Your withdrawal request for ${withdrawal.amount} ${withdrawal.currency} was rejected.`,
+            type:
+              "transaction"
+          });
+      } catch (error) {
+        console.error(
+          "WITHDRAWAL NOTIFICATION ERROR:",
+          error
+        );
+      }
 
-          user_id:
-            withdrawal.user_id,
+      try {
+        await supabase
+          .from("audit_logs")
+          .insert({
+            admin_id:
+              req.user.id,
+            action:
+              "reject_withdrawal",
+            target_type:
+              "withdrawal",
+            target_id:
+              withdrawal.id,
+            description:
+              `Rejected withdrawal ${withdrawal.id}`
+          });
+      } catch (error) {
+        console.error(
+          "AUDIT LOG ERROR:",
+          error
+        );
+      }
 
-          title:
-            "Withdrawal Rejected",
-
-          message:
-            `Your withdrawal request for ${withdrawal.amount} ${withdrawal.currency} was rejected.`,
-
-          type:
-            "transaction"
-
-        });
-
-      await supabase
-        .from("audit_logs")
-        .insert({
-
-          admin_id:
-            req.user.id,
-
-          action:
-            "reject_withdrawal",
-
-          target_type:
-            "withdrawal",
-
-          target_id:
-            withdrawal.id,
-
-          description:
-            `Rejected withdrawal ${withdrawal.id}`
-
-        });
-
-      res.json({
-
-        success:
-          true,
-
+      return res.json({
+        success: true,
         message:
           "Withdrawal rejected",
-
         withdrawal:
           data
-
       });
-
     } catch (error) {
-
       console.error(error);
 
-      res.status(500).json({
-
-        success:
-          false,
-
+      return res.status(500).json({
+        success: false,
         message:
           "Unable to reject withdrawal"
-
       });
-
     }
-
   }
 );
 
-// =====================================================
-// ADMIN - SUPPORT CONVERSATIONS
-// =====================================================
+/* =====================================================
+   ADMIN SUPPORT
+===================================================== */
 
 app.get(
   "/api/admin/support/conversations",
   authenticateAdmin,
   async (req, res) => {
-
     try {
-
       const {
         data,
         error
-      } = await supabase
-        .from("support_conversations")
-        .select("*")
-        .order("updated_at", {
-          ascending: false
-        });
+      } =
+        await supabase
+          .from("support_conversations")
+          .select("*")
+          .order("updated_at", {
+            ascending: false
+          });
 
       if (error) {
-
         return res.status(500).json({
           success: false,
           message:
             error.message
         });
-
       }
 
-      res.json({
+      return res.json({
         success: true,
         conversations:
-          data
+          data || []
       });
-
     } catch (error) {
-
       console.error(error);
 
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         message:
           "Unable to load support conversations"
       });
-
     }
-
   }
 );
-
-// =====================================================
-// ADMIN - SUPPORT MESSAGES
-// =====================================================
 
 app.get(
   "/api/admin/support/conversations/:id/messages",
   authenticateAdmin,
   async (req, res) => {
-
     try {
-
       const {
         data,
         error
-      } = await supabase
-        .from("support_messages")
-        .select("*")
-        .eq(
-          "conversation_id",
-          req.params.id
-        )
-        .order("created_at", {
-          ascending: true
-        });
+      } =
+        await supabase
+          .from("support_messages")
+          .select("*")
+          .eq(
+            "conversation_id",
+            req.params.id
+          )
+          .order("created_at", {
+            ascending: true
+          });
 
       if (error) {
-
         return res.status(500).json({
           success: false,
           message:
             error.message
         });
-
       }
 
-      res.json({
+      return res.json({
         success: true,
         messages:
-          data
+          data || []
       });
-
     } catch (error) {
-
       console.error(error);
 
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         message:
           "Unable to load messages"
       });
-
     }
-
   }
 );
-
-// =====================================================
-// ADMIN - SEND SUPPORT MESSAGE
-// =====================================================
 
 app.post(
   "/api/admin/support/conversations/:id/messages",
   authenticateAdmin,
   async (req, res) => {
-
     try {
-
       const {
         message
-      } = req.body;
+      } = req.body || {};
 
       if (!message) {
-
         return res.status(400).json({
           success: false,
           message:
             "Message is required"
         });
-
       }
 
       const {
         data: conversation
-      } = await supabase
-        .from("support_conversations")
-        .select("*")
-        .eq(
-          "id",
-          req.params.id
-        )
-        .maybeSingle();
+      } =
+        await supabase
+          .from("support_conversations")
+          .select("*")
+          .eq(
+            "id",
+            req.params.id
+          )
+          .maybeSingle();
 
       if (!conversation) {
-
         return res.status(404).json({
           success: false,
           message:
             "Conversation not found"
         });
-
       }
 
       const {
         data,
         error
-      } = await supabase
-        .from("support_messages")
-        .insert({
-
-          conversation_id:
-            req.params.id,
-
-          sender_type:
-            "admin",
-
-          sender_id:
-            req.user.id,
-
-          message
-
-        })
-        .select()
-        .single();
+      } =
+        await supabase
+          .from("support_messages")
+          .insert({
+            conversation_id:
+              req.params.id,
+            sender_type:
+              "admin",
+            sender_id:
+              req.user.id,
+            message:
+              String(message).trim()
+          })
+          .select()
+          .single();
 
       if (error) {
-
         return res.status(400).json({
           success: false,
           message:
             error.message
         });
-
       }
 
       await supabase
         .from("support_conversations")
         .update({
-
           updated_at:
             new Date().toISOString(),
-
           status:
             "open"
-
         })
         .eq(
           "id",
           req.params.id
         );
 
-      await supabase
-        .from("notifications")
-        .insert({
+      try {
+        await supabase
+          .from("notifications")
+          .insert({
+            user_id:
+              conversation.user_id,
+            title:
+              "New Support Message",
+            message:
+              "You have received a new message from Sterling One Bank Support.",
+            type:
+              "system"
+          });
+      } catch (error) {
+        console.error(
+          "SUPPORT NOTIFICATION ERROR:",
+          error
+        );
+      }
 
-          user_id:
-            conversation.user_id,
-
-          title:
-            "New Support Message",
-
-          message:
-            "You have received a new message from Sterling One Bank Support.",
-
-          type:
-            "system"
-
-        });
-
-      res.status(201).json({
-
-        success:
-          true,
-
+      return res.status(201).json({
+        success: true,
         message:
           data
-
       });
-
     } catch (error) {
-
       console.error(error);
 
-      res.status(500).json({
-
-        success:
-          false,
-
+      return res.status(500).json({
+        success: false,
         message:
           "Unable to send support message"
-
       });
-
     }
-
   }
 );
-
-// =====================================================
-// ADMIN - CLOSE SUPPORT CONVERSATION
-// =====================================================
 
 app.patch(
   "/api/admin/support/conversations/:id/close",
   authenticateAdmin,
   async (req, res) => {
-
     try {
-
       const {
         data,
         error
-      } = await supabase
-        .from("support_conversations")
-        .update({
-
-          status:
-            "closed",
-
-          updated_at:
-            new Date().toISOString()
-
-        })
-        .eq(
-          "id",
-          req.params.id
-        )
-        .select()
-        .single();
+      } =
+        await supabase
+          .from("support_conversations")
+          .update({
+            status:
+              "closed",
+            updated_at:
+              new Date().toISOString()
+          })
+          .eq(
+            "id",
+            req.params.id
+          )
+          .select()
+          .single();
 
       if (error) {
-
         return res.status(400).json({
           success: false,
           message:
             error.message
         });
-
       }
 
-      res.json({
-
-        success:
-          true,
-
+      return res.json({
+        success: true,
         message:
           "Conversation closed",
-
         conversation:
           data
-
       });
-
     } catch (error) {
-
       console.error(error);
 
-      res.status(500).json({
-
-        success:
-          false,
-
+      return res.status(500).json({
+        success: false,
         message:
           "Unable to close conversation"
-
       });
-
     }
-
   }
 );
 
-// =====================================================
-// SERVER
-// =====================================================
+/* =====================================================
+   404 HANDLER
+===================================================== */
 
-const PORT =
-  process.env.PORT || 5000;
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message:
+      `Route not found: ${req.method} ${req.originalUrl}`
+  });
+});
+
+/* =====================================================
+   GLOBAL ERROR HANDLER
+===================================================== */
+
+app.use((error, req, res, next) => {
+  console.error(
+    "UNHANDLED SERVER ERROR:",
+    error
+  );
+
+  if (res.headersSent) {
+    return next(error);
+  }
+
+  res.status(500).json({
+    success: false,
+    message:
+      "Internal server error",
+    error:
+      error.message
+  });
+});
+
+/* =====================================================
+   START SERVER
+===================================================== */
 
 app.listen(
   PORT,
   () => {
-
     console.log(
       `Sterling One Bank API running on port ${PORT}`
     );
-
   }
 );
