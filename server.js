@@ -16,7 +16,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-
 // =====================================================
 // BASIC
 // =====================================================
@@ -27,7 +26,6 @@ app.get("/", (req, res) => {
     message: "Sterling One Bank API is running"
   });
 });
-
 
 // =====================================================
 // SUPABASE TEST
@@ -63,7 +61,6 @@ app.get("/api/test-supabase", async (req, res) => {
   }
 });
 
-
 // =====================================================
 // HELPERS
 // =====================================================
@@ -75,7 +72,6 @@ function generateReference(prefix = "STL") {
     .toUpperCase()}`;
 }
 
-
 function isAdminValue(value) {
   if (value === true) return true;
   if (value === 1) return true;
@@ -85,7 +81,6 @@ function isAdminValue(value) {
   return false;
 }
 
-
 function isSuspendedValue(value) {
   if (value === true) return true;
   if (value === 1) return true;
@@ -94,7 +89,6 @@ function isSuspendedValue(value) {
 
   return false;
 }
-
 
 async function generateAccountNumber() {
   while (true) {
@@ -113,7 +107,6 @@ async function generateAccountNumber() {
     }
   }
 }
-
 
 // =====================================================
 // AUTH MIDDLEWARE
@@ -157,7 +150,6 @@ async function authenticate(req, res, next) {
     });
   }
 }
-
 
 // =====================================================
 // ADMIN MIDDLEWARE
@@ -289,7 +281,6 @@ async function authenticateAdmin(req, res, next) {
     });
   }
 }
-
 
 // =====================================================
 // REGISTER
@@ -534,7 +525,6 @@ app.post("/api/auth/register", async (req, res) => {
   }
 });
 
-
 // =====================================================
 // LOGIN
 // =====================================================
@@ -649,7 +639,6 @@ app.post("/api/auth/login", async (req, res) => {
     });
   }
 });
-
 
 // =====================================================
 // GET CURRENT USER
@@ -868,7 +857,6 @@ app.get(
   }
 );
 
-
 // =====================================================
 // PASSWORD RESET REQUEST
 // =====================================================
@@ -918,7 +906,6 @@ app.post(
 
   }
 );
-
 
 // =====================================================
 // ACCOUNTS
@@ -977,7 +964,6 @@ app.get(
 
   }
 );
-
 
 // =====================================================
 // ACCOUNT DETAILS
@@ -1043,7 +1029,6 @@ app.get(
   }
 );
 
-
 // =====================================================
 // TRANSACTIONS
 // =====================================================
@@ -1098,7 +1083,6 @@ app.get(
   }
 );
 
-
 // =====================================================
 // BENEFICIARIES
 // =====================================================
@@ -1152,7 +1136,6 @@ app.get(
 
   }
 );
-
 
 app.post(
   "/api/beneficiaries",
@@ -1229,7 +1212,6 @@ app.post(
   }
 );
 
-
 app.delete(
   "/api/beneficiaries/:id",
   authenticate,
@@ -1280,7 +1262,6 @@ app.delete(
 
   }
 );
-
 
 // =====================================================
 // TRANSFER REQUEST
@@ -1473,7 +1454,6 @@ app.post(
   }
 );
 
-
 // =====================================================
 // WITHDRAWAL REQUEST
 // =====================================================
@@ -1634,7 +1614,6 @@ app.post(
   }
 );
 
-
 // =====================================================
 // CUSTOMER WITHDRAWALS
 // =====================================================
@@ -1688,7 +1667,6 @@ app.get(
 
   }
 );
-
 
 // =====================================================
 // CARDS
@@ -1744,7 +1722,6 @@ app.get(
   }
 );
 
-
 // =====================================================
 // NOTIFICATIONS
 // =====================================================
@@ -1798,7 +1775,6 @@ app.get(
 
   }
 );
-
 
 // =====================================================
 // MARK NOTIFICATION AS READ
@@ -1860,7 +1836,6 @@ app.patch(
 
   }
 );
-
 
 // =====================================================
 // SUPPORT - CREATE CONVERSATION
@@ -1962,7 +1937,6 @@ app.post(
   }
 );
 
-
 // =====================================================
 // SUPPORT - CUSTOMER CONVERSATIONS
 // =====================================================
@@ -2016,7 +1990,6 @@ app.get(
 
   }
 );
-
 
 // =====================================================
 // SUPPORT - GET MESSAGES
@@ -2096,7 +2069,6 @@ app.get(
 
   }
 );
-
 
 // =====================================================
 // SUPPORT - SEND CUSTOMER MESSAGE
@@ -2211,7 +2183,6 @@ app.post(
   }
 );
 
-
 // =====================================================
 // ADMIN - DASHBOARD STATS
 // =====================================================
@@ -2308,7 +2279,6 @@ app.get(
   }
 );
 
-
 // =====================================================
 // ADMIN - GET ALL CUSTOMERS / USERS
 // =====================================================
@@ -2333,7 +2303,6 @@ app.get(
         req.user?.email
       );
 
-
       // -------------------------------------------------
       // 1. GET ALL PROFILES
       // -------------------------------------------------
@@ -2350,7 +2319,6 @@ app.get(
             ascending: false
           }
         );
-
 
       if (profilesError) {
 
@@ -2369,12 +2337,10 @@ app.get(
 
       }
 
-
       console.log(
         "TOTAL PROFILES:",
         profiles?.length || 0
       );
-
 
       // -------------------------------------------------
       // 2. SHOW ADMIN VALUES FOR DEBUGGING
@@ -2396,7 +2362,6 @@ app.get(
         )
       );
 
-
       // -------------------------------------------------
       // 3. FILTER ADMIN ACCOUNTS
       // -------------------------------------------------
@@ -2409,12 +2374,10 @@ app.get(
             )
         );
 
-
       console.log(
         "CUSTOMER PROFILES:",
         customerProfiles.length
       );
-
 
       // -------------------------------------------------
       // 4. GET ACCOUNTS
@@ -2426,7 +2389,6 @@ app.get(
       } = await supabase
         .from("accounts")
         .select("*");
-
 
       if (accountsError) {
 
@@ -2445,7 +2407,6 @@ app.get(
 
       }
 
-
       // -------------------------------------------------
       // 5. GET ACCOUNT BALANCES
       // -------------------------------------------------
@@ -2456,7 +2417,6 @@ app.get(
       } = await supabase
         .from("account_balances")
         .select("*");
-
 
       if (balancesError) {
 
@@ -2474,7 +2434,6 @@ app.get(
         });
 
       }
-
 
       // -------------------------------------------------
       // 6. GET AUTH USERS
@@ -2517,7 +2476,6 @@ app.get(
 
       }
 
-
       // -------------------------------------------------
       // 7. LOOKUP MAPS
       // -------------------------------------------------
@@ -2533,7 +2491,6 @@ app.get(
           );
         }
       );
-
 
       const accountMap =
         new Map();
@@ -2558,7 +2515,6 @@ app.get(
         }
       );
 
-
       const balanceMap =
         new Map();
 
@@ -2578,7 +2534,6 @@ app.get(
 
         }
       );
-
 
       // -------------------------------------------------
       // 8. BUILD CUSTOMER LIST
@@ -2605,7 +2560,6 @@ app.get(
                   )
                 : null;
 
-
             const firstName =
               profile.first_name ||
               "";
@@ -2614,13 +2568,11 @@ app.get(
               profile.surname ||
               "";
 
-
             const fullName =
               `${firstName} ${surname}`
                 .trim() ||
               profile.full_name ||
               "Unnamed User";
-
 
             const availableBalance =
               accountBalance
@@ -2628,7 +2580,6 @@ app.get(
               accountBalance
                 ?.balance ??
               0;
-
 
             return {
 
@@ -2676,17 +2627,14 @@ app.get(
           }
         );
 
-
       console.log(
         "FINAL USERS SENT TO ADMIN:",
         users.length
       );
 
-
       console.log(
         "=========================================="
       );
-
 
       return res.status(200).json({
 
@@ -2695,7 +2643,6 @@ app.get(
         users
 
       });
-
 
     } catch (error) {
 
@@ -2721,7 +2668,6 @@ app.get(
   }
 );
 
-
 // =====================================================
 // ADMIN - GET SINGLE USER
 // =====================================================
@@ -2736,7 +2682,6 @@ app.get(
       const userId =
         req.params.id;
 
-
       const {
         data: profile,
         error: profileError
@@ -2748,7 +2693,6 @@ app.get(
           userId
         )
         .maybeSingle();
-
 
       if (profileError) {
 
@@ -2765,7 +2709,6 @@ app.get(
 
       }
 
-
       if (!profile) {
 
         return res.status(404).json({
@@ -2776,7 +2719,6 @@ app.get(
 
       }
 
-
       const {
         data: authUserData,
         error: authUserError
@@ -2785,7 +2727,6 @@ app.get(
           .getUserById(
             userId
           );
-
 
       if (authUserError) {
 
@@ -2802,11 +2743,9 @@ app.get(
 
       }
 
-
       const authUser =
         authUserData?.user ||
         null;
-
 
       const {
         data: address,
@@ -2820,7 +2759,6 @@ app.get(
         )
         .maybeSingle();
 
-
       if (addressError) {
 
         console.error(
@@ -2829,7 +2767,6 @@ app.get(
         );
 
       }
-
 
       const {
         data: accounts,
@@ -2854,7 +2791,6 @@ app.get(
           userId
         );
 
-
       if (accountsError) {
 
         console.error(
@@ -2870,7 +2806,6 @@ app.get(
 
       }
 
-
       const {
         data: cards,
         error: cardsError
@@ -2881,7 +2816,6 @@ app.get(
           "user_id",
           userId
         );
-
 
       if (cardsError) {
 
@@ -2898,7 +2832,6 @@ app.get(
 
       }
 
-
       const checkingAccount =
         (accounts || []).find(
           account =>
@@ -2907,7 +2840,6 @@ app.get(
             ).toLowerCase() ===
             "checking"
         );
-
 
       const savingsAccount =
         (accounts || []).find(
@@ -2926,14 +2858,12 @@ app.get(
           }
         );
 
-
       const checkingBalance =
         Number(
           checkingAccount
             ?.account_balances?.[0]
             ?.available_balance ?? 0
         );
-
 
       const savingsBalance =
         Number(
@@ -2942,17 +2872,14 @@ app.get(
             ?.available_balance ?? 0
         );
 
-
       const card =
         (cards || [])[0] ||
         null;
-
 
       const cardBalance =
         Number(
           card?.balance ?? 0
         );
-
 
       const fullName = [
 
@@ -2964,7 +2891,6 @@ app.get(
         .filter(Boolean)
         .join(" ")
         .trim();
-
 
       res.json({
 
@@ -3009,7 +2935,6 @@ app.get(
 
       });
 
-
     } catch (error) {
 
       console.error(
@@ -3031,7 +2956,6 @@ app.get(
   }
 );
 
-
 // =====================================================
 // ADMIN - UPDATE USER ACCOUNT BALANCES
 // =====================================================
@@ -3052,7 +2976,6 @@ app.put(
         card_balance
       } = req.body;
 
-
       const checking =
         Number(
           checking_balance
@@ -3068,7 +2991,6 @@ app.put(
           card_balance
         );
 
-
       if (
         !Number.isFinite(checking) ||
         !Number.isFinite(savings) ||
@@ -3082,7 +3004,6 @@ app.put(
         });
 
       }
-
 
       if (
         checking < 0 ||
@@ -3098,7 +3019,6 @@ app.put(
 
       }
 
-
       const {
         data: profile,
         error: profileError
@@ -3112,7 +3032,6 @@ app.put(
           userId
         )
         .maybeSingle();
-
 
       if (profileError) {
 
@@ -3129,7 +3048,6 @@ app.put(
 
       }
 
-
       if (!profile) {
 
         return res.status(404).json({
@@ -3139,7 +3057,6 @@ app.put(
         });
 
       }
-
 
       if (
         isAdminValue(
@@ -3155,7 +3072,6 @@ app.put(
 
       }
 
-
       const {
         data: accounts,
         error: accountsError
@@ -3166,7 +3082,6 @@ app.put(
           "user_id",
           userId
         );
-
 
       if (accountsError) {
 
@@ -3183,7 +3098,6 @@ app.put(
 
       }
 
-
       let checkingAccount =
         (accounts || []).find(
           account =>
@@ -3192,7 +3106,6 @@ app.put(
             ).toLowerCase() ===
             "checking"
         );
-
 
       let savingsAccount =
         (accounts || []).find(
@@ -3211,7 +3124,6 @@ app.put(
           }
         );
 
-
       if (!checkingAccount) {
 
         return res.status(400).json({
@@ -3221,7 +3133,6 @@ app.put(
         });
 
       }
-
 
       const {
         error: checkingUpdateError
@@ -3244,7 +3155,6 @@ app.put(
           checkingAccount.id
         );
 
-
       if (checkingUpdateError) {
 
         console.error(
@@ -3260,7 +3170,6 @@ app.put(
         });
 
       }
-
 
       if (savingsAccount) {
 
@@ -3285,7 +3194,6 @@ app.put(
             savingsAccount.id
           );
 
-
         if (savingsUpdateError) {
 
           console.error(
@@ -3306,7 +3214,6 @@ app.put(
 
         const savingsAccountNumber =
           await generateAccountNumber();
-
 
         const {
           data: newSavingsAccount,
@@ -3334,7 +3241,6 @@ app.put(
           .select()
           .single();
 
-
         if (savingsAccountError) {
 
           console.error(
@@ -3350,7 +3256,6 @@ app.put(
           });
 
         }
-
 
         const {
           error: savingsBalanceError
@@ -3372,7 +3277,6 @@ app.put(
 
           });
 
-
         if (savingsBalanceError) {
 
           console.error(
@@ -3391,7 +3295,6 @@ app.put(
 
       }
 
-
       const {
         data: cards,
         error: cardsError
@@ -3402,7 +3305,6 @@ app.put(
           "user_id",
           userId
         );
-
 
       if (cardsError) {
 
@@ -3419,7 +3321,6 @@ app.put(
         });
 
       }
-
 
       if (
         cards &&
@@ -3438,7 +3339,6 @@ app.put(
             userId
           );
 
-
         if (cardUpdateError) {
 
           console.error(
@@ -3456,7 +3356,6 @@ app.put(
         }
 
       }
-
 
       const {
         data: finalAccounts,
@@ -3477,7 +3376,6 @@ app.put(
           userId
         );
 
-
       if (finalAccountsError) {
 
         console.error(
@@ -3493,7 +3391,6 @@ app.put(
 
       }
 
-
       const finalChecking =
         (finalAccounts || []).find(
           account =>
@@ -3502,7 +3399,6 @@ app.put(
             ).toLowerCase() ===
             "checking"
         );
-
 
       const finalSavings =
         (finalAccounts || []).find(
@@ -3521,7 +3417,6 @@ app.put(
           }
         );
 
-
       const {
         data: finalCards
       } = await supabase
@@ -3532,11 +3427,9 @@ app.put(
           userId
         );
 
-
       const finalCard =
         finalCards?.[0]?.balance ??
         0;
-
 
       res.json({
 
@@ -3572,7 +3465,6 @@ app.put(
 
       });
 
-
     } catch (error) {
 
       console.error(
@@ -3593,7 +3485,6 @@ app.put(
 
   }
 );
-
 
 // =====================================================
 // ADMIN - WITHDRAWALS
@@ -3645,7 +3536,6 @@ app.get(
   }
 );
 
-
 // =====================================================
 // ADMIN - APPROVE WITHDRAWAL
 // =====================================================
@@ -3660,7 +3550,6 @@ app.patch(
       const withdrawalId =
         req.params.id;
 
-
       const {
         data: withdrawal
       } = await supabase
@@ -3672,7 +3561,6 @@ app.patch(
         )
         .maybeSingle();
 
-
       if (!withdrawal) {
 
         return res.status(404).json({
@@ -3682,7 +3570,6 @@ app.patch(
         });
 
       }
-
 
       if (
         withdrawal.status !==
@@ -3696,7 +3583,6 @@ app.patch(
         });
 
       }
-
 
       const {
         data,
@@ -3726,7 +3612,6 @@ app.patch(
         .select()
         .single();
 
-
       if (error) {
 
         return res.status(400).json({
@@ -3736,7 +3621,6 @@ app.patch(
         });
 
       }
-
 
       await supabase
         .from("notifications")
@@ -3755,7 +3639,6 @@ app.patch(
             "transaction"
 
         });
-
 
       await supabase
         .from("audit_logs")
@@ -3778,7 +3661,6 @@ app.patch(
 
         });
 
-
       res.json({
 
         success:
@@ -3791,7 +3673,6 @@ app.patch(
           data
 
       });
-
 
     } catch (error) {
 
@@ -3812,7 +3693,6 @@ app.patch(
   }
 );
 
-
 // =====================================================
 // ADMIN - REJECT WITHDRAWAL
 // =====================================================
@@ -3827,7 +3707,6 @@ app.patch(
       const withdrawalId =
         req.params.id;
 
-
       const {
         data: withdrawal
       } = await supabase
@@ -3839,7 +3718,6 @@ app.patch(
         )
         .maybeSingle();
 
-
       if (!withdrawal) {
 
         return res.status(404).json({
@@ -3849,7 +3727,6 @@ app.patch(
         });
 
       }
-
 
       if (
         withdrawal.status !==
@@ -3863,7 +3740,6 @@ app.patch(
         });
 
       }
-
 
       const {
         data,
@@ -3893,7 +3769,6 @@ app.patch(
         .select()
         .single();
 
-
       if (error) {
 
         return res.status(400).json({
@@ -3903,7 +3778,6 @@ app.patch(
         });
 
       }
-
 
       await supabase
         .from("notifications")
@@ -3922,7 +3796,6 @@ app.patch(
             "transaction"
 
         });
-
 
       await supabase
         .from("audit_logs")
@@ -3945,7 +3818,6 @@ app.patch(
 
         });
 
-
       res.json({
 
         success:
@@ -3958,7 +3830,6 @@ app.patch(
           data
 
       });
-
 
     } catch (error) {
 
@@ -3978,7 +3849,6 @@ app.patch(
 
   }
 );
-
 
 // =====================================================
 // ADMIN - SUPPORT CONVERSATIONS
@@ -4031,7 +3901,6 @@ app.get(
 
   }
 );
-
 
 // =====================================================
 // ADMIN - SUPPORT MESSAGES
@@ -4089,7 +3958,6 @@ app.get(
   }
 );
 
-
 // =====================================================
 // ADMIN - SEND SUPPORT MESSAGE
 // =====================================================
@@ -4115,7 +3983,6 @@ app.post(
 
       }
 
-
       const {
         data: conversation
       } = await supabase
@@ -4127,7 +3994,6 @@ app.post(
         )
         .maybeSingle();
 
-
       if (!conversation) {
 
         return res.status(404).json({
@@ -4137,7 +4003,6 @@ app.post(
         });
 
       }
-
 
       const {
         data,
@@ -4161,7 +4026,6 @@ app.post(
         .select()
         .single();
 
-
       if (error) {
 
         return res.status(400).json({
@@ -4171,7 +4035,6 @@ app.post(
         });
 
       }
-
 
       await supabase
         .from("support_conversations")
@@ -4188,7 +4051,6 @@ app.post(
           "id",
           req.params.id
         );
-
 
       await supabase
         .from("notifications")
@@ -4208,7 +4070,6 @@ app.post(
 
         });
 
-
       res.status(201).json({
 
         success:
@@ -4218,7 +4079,6 @@ app.post(
           data
 
       });
-
 
     } catch (error) {
 
@@ -4238,7 +4098,6 @@ app.post(
 
   }
 );
-
 
 // =====================================================
 // ADMIN - CLOSE SUPPORT CONVERSATION
@@ -4272,7 +4131,6 @@ app.patch(
         .select()
         .single();
 
-
       if (error) {
 
         return res.status(400).json({
@@ -4282,7 +4140,6 @@ app.patch(
         });
 
       }
-
 
       res.json({
 
@@ -4296,7 +4153,6 @@ app.patch(
           data
 
       });
-
 
     } catch (error) {
 
@@ -4316,7 +4172,6 @@ app.patch(
 
   }
 );
-
 
 // =====================================================
 // SERVER
