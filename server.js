@@ -1,4 +1,3 @@
-
 require("dotenv").config();
 
 const express = require("express");
@@ -7,7 +6,12 @@ const crypto = require("crypto");
 
 const supabase = require("./supabase");
 
-const app = express();
+const { createClient } = require("@supabase/supabase-js");
+
+const supabaseAuth = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_ANON_KEY
+);
 
 /* =====================================================
    CONFIG
@@ -1154,14 +1158,17 @@ app.post(
   "/api/auth/login",
   async (req, res) => {
     try {
+
       const {
         email,
         password
       } = req.body || {};
+
       const cleanEmail =
         String(email || "")
           .trim()
           .toLowerCase();
+
       if (
         !cleanEmail ||
         !password
@@ -1172,17 +1179,19 @@ app.post(
             "Email and password are required"
         });
       }
+
       const {
         data,
         error
       } =
-        await supabase.auth.signInWithPassword(
+        await supabaseAuth.auth.signInWithPassword(
           {
             email:
               cleanEmail,
             password
           }
         );
+
       if (
         error ||
         !data?.user ||
@@ -1192,17 +1201,22 @@ app.post(
           "LOGIN AUTH ERROR:",
           error
         );
+
         return res.status(401).json({
           success: false,
           message:
             "Invalid email or password"
         });
       }
+
       const user =
         data.user;
+
+
       /* ---------------------------------------------
          LOAD PROFILE
       --------------------------------------------- */
+
       const {
         data: profile,
         error: profileError
@@ -1217,11 +1231,14 @@ app.post(
             user.id
           )
           .maybeSingle();
+
       if (profileError) {
+
         console.error(
           "LOGIN PROFILE ERROR:",
           profileError
         );
+
         return res.status(500).json({
           success: false,
           message:
@@ -1230,43 +1247,61 @@ app.post(
             profileError.message
         });
       }
+
       if (!profile) {
+
         return res.status(403).json({
           success: false,
           message:
             "User profile not found"
         });
       }
+
       const isAdmin =
         isAdminValue(
           profile.is_admin
         );
+
       return res.json({
+
         success: true,
+
         message:
           "Login successful",
+
         session:
           data.session,
+
         access_token:
           data.session.access_token,
+
         refresh_token:
           data.session.refresh_token,
+
         token:
           data.session.access_token,
+
         expires_at:
           data.session.expires_at,
+
         expires_in:
           data.session.expires_in,
+
         user,
+
         profile,
+
         is_admin:
           isAdmin
       });
+
     } catch (error) {
+
       console.error(
         "LOGIN ERROR:",
         error
       );
+
       return res.status(500).json({
         success: false,
         message:
