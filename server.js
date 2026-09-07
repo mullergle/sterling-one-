@@ -6,6 +6,8 @@ const crypto = require("crypto");
 
 const supabase = require("./supabase");
 
+const app = express();
+
 
 
 /* =====================================================
