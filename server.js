@@ -1151,49 +1151,67 @@ app.post(
    LOGIN
 ===================================================== */
 
+const { createClient } = require("@supabase/supabase-js");
+
 app.post(
   "/api/auth/login",
   async (req, res) => {
     try {
 
-      const {
-        email,
-        password
-      } = req.body || {};
+      const { email, password } = req.body || {};
 
       const cleanEmail =
         String(email || "")
           .trim()
           .toLowerCase();
 
-      if (
-        !cleanEmail ||
-        !password
-      ) {
+      if (!cleanEmail || !password) {
         return res.status(400).json({
           success: false,
-          message:
-            "Email and password are required"
+          message: "Email and password are required"
         });
       }
+
+
+      // =====================================================
+      // CREATE A SEPARATE AUTH CLIENT
+      // This prevents login from changing the global
+      // service-role Supabase client's session.
+      // =====================================================
+
+      const authClient = createClient(
+        process.env.SUPABASE_URL,
+        process.env.SUPABASE_SERVICE_ROLE_KEY,
+        {
+          auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+            detectSessionInUrl: false
+          }
+        }
+      );
+
+
+      // =====================================================
+      // LOGIN
+      // =====================================================
 
       const {
         data,
         error
       } =
-        await supabase.auth.signInWithPassword(
-          {
-            email:
-              cleanEmail,
-            password
-          }
-        );
+        await authClient.auth.signInWithPassword({
+          email: cleanEmail,
+          password
+        });
+
 
       if (
         error ||
         !data?.user ||
         !data?.session
       ) {
+
         console.error(
           "LOGIN AUTH ERROR:",
           error
@@ -1201,18 +1219,18 @@ app.post(
 
         return res.status(401).json({
           success: false,
-          message:
-            "Invalid email or password"
+          message: "Invalid email or password"
         });
       }
+
 
       const user =
         data.user;
 
 
-      /* ---------------------------------------------
-         LOAD PROFILE
-      --------------------------------------------- */
+      // =====================================================
+      // LOAD PROFILE
+      // =====================================================
 
       const {
         data: profile,
@@ -1223,11 +1241,9 @@ app.post(
           .select(
             "id, first_name, surname, phone, is_admin"
           )
-          .eq(
-            "id",
-            user.id
-          )
+          .eq("id", user.id)
           .maybeSingle();
+
 
       if (profileError) {
 
@@ -1238,26 +1254,34 @@ app.post(
 
         return res.status(500).json({
           success: false,
-          message:
-            "Unable to verify account",
-          error:
-            profileError.message
+          message: "Unable to verify account",
+          error: profileError.message
         });
       }
+
 
       if (!profile) {
 
         return res.status(403).json({
           success: false,
-          message:
-            "User profile not found"
+          message: "User profile not found"
         });
       }
+
+
+      // =====================================================
+      // ADMIN CHECK
+      // =====================================================
 
       const isAdmin =
         isAdminValue(
           profile.is_admin
         );
+
+
+      // =====================================================
+      // RESPONSE
+      // =====================================================
 
       return res.json({
 
@@ -1290,6 +1314,7 @@ app.post(
 
         is_admin:
           isAdmin
+
       });
 
     } catch (error) {
@@ -1301,10 +1326,8 @@ app.post(
 
       return res.status(500).json({
         success: false,
-        message:
-          "Unable to login",
-        error:
-          error.message
+        message: "Unable to login",
+        error: error.message
       });
     }
   }
