@@ -3282,6 +3282,20 @@ app.get(
           error: profilesError.message
         });
       }
+      
+            console.log(
+  "PROFILES COUNT:",
+  profiles?.length
+);
+
+console.log(
+  "PROFILE ADMIN VALUES:",
+  (profiles || []).map(profile => ({
+    id: profile.id,
+    email: profile.email,
+    is_admin: profile.is_admin
+  }))
+);
 
       /* ---------------------------------------------
          ACCOUNTS
