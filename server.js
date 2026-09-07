@@ -644,6 +644,109 @@ async function authenticateAdmin(
   }
 }
 
+// =====================================================
+// SUPPORT CHAT
+// =====================================================
+
+app.get("/support/messages/:userId", authenticate, async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    if (req.user.id !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized"
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("support_messages")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", {
+        ascending: true
+      });
+
+    if (error) {
+      console.error("SUPPORT LOAD ERROR:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: "Unable to load messages",
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      messages: data || []
+    });
+
+  } catch (error) {
+    console.error("SUPPORT GET ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to load messages"
+    });
+  }
+});
+
+
+app.post("/support/messages", authenticate, async (req, res) => {
+  try {
+    const { user_id, message } = req.body || {};
+
+    if (!user_id || !message || !String(message).trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Message is required"
+      });
+    }
+
+    if (req.user.id !== user_id) {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized"
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("support_messages")
+      .insert({
+        user_id: user_id,
+        message: String(message).trim(),
+        sender: "user",
+        is_read: false
+      })
+      .select("*")
+      .single();
+
+    if (error) {
+      console.error("SUPPORT SEND ERROR:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: "Unable to send message",
+        error: error.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: data
+    });
+
+  } catch (error) {
+    console.error("SUPPORT POST ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to send message"
+    });
+  }
+});
+
 /* =====================================================
    REGISTER
 ===================================================== */
