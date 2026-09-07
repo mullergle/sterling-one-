@@ -3264,11 +3264,25 @@ app.get(
       --------------------------------------------- */
 
       const {
-        data: profiles,
-        error: profilesError
-      } = await supabase
-        .from("profiles")
-        .select("*");
+  data: profiles,
+  error:
+    profilesError
+} =
+  await supabase
+    .from("profiles")
+    .select("*");
+
+console.log(
+  "SUPABASE URL:",
+  process.env.SUPABASE_URL
+);
+
+console.log(
+  "SERVICE ROLE KEY LOADED:",
+  !!process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+
+if (profilesError) {
 
       if (profilesError) {
         console.error(
