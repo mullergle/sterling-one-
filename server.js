@@ -1140,14 +1140,20 @@ app.get(
         userId
       } = req.params;
 
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Customer ID is required"
+        });
+      }
+
       const {
         data,
         error
       } =
         await supabase
-          .from(
-            "support_messages"
-          )
+          .from("support_messages")
           .select("*")
           .eq(
             "user_id",
@@ -1156,8 +1162,7 @@ app.get(
           .order(
             "created_at",
             {
-              ascending:
-                true
+              ascending: true
             }
           );
 
@@ -1170,9 +1175,16 @@ app.get(
         return res.status(500).json({
           success: false,
           message:
-            "Unable to load support messages",
+            "Unable to load support messages: " +
+            error.message,
           error:
-            error.message
+            error.message,
+          code:
+            error.code || null,
+          details:
+            error.details || null,
+          hint:
+            error.hint || null
         });
       }
 
@@ -1181,6 +1193,7 @@ app.get(
         messages:
           data || []
       });
+
     } catch (error) {
       console.error(
         "ADMIN SUPPORT GET ERROR:",
@@ -1190,7 +1203,10 @@ app.get(
       return res.status(500).json({
         success: false,
         message:
-          "Unable to load support messages"
+          "Unable to load support messages: " +
+          error.message,
+        error:
+          error.message
       });
     }
   }
