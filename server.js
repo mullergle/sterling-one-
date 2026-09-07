@@ -1254,18 +1254,7 @@ app.post(
           profile.is_admin
         );
 
-      const isSuspended =
-        isSuspendedValue(
-          profile.is_suspended
-        );
-
-      if (isSuspended) {
-        return res.status(403).json({
-          success: false,
-          message:
-            "This account has been suspended"
-        });
-      }
+      
 
       return res.json({
         success: true,
