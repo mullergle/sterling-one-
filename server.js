@@ -740,53 +740,83 @@ app.post(
       ) {
         return res.status(400).json({
           success: false,
-          message:
-            "Message is required"
+          message: "Message is required"
         });
       }
 
-      if (
-        req.user.id !==
-        user_id
-      ) {
+      // Make sure the authenticated user can only send
+      // messages for their own account.
+      if (req.user.id !== user_id) {
         return res.status(403).json({
           success: false,
+          message: "Unauthorized"
+        });
+      }
+
+      // Find the user's existing conversation.
+      const {
+        data: existingMessage,
+        error: conversationError
+      } = await supabase
+        .from("support_messages")
+        .select("conversation_id")
+        .eq("user_id", user_id)
+        .order("created_at", {
+          ascending: false
+        })
+        .limit(1)
+        .maybeSingle();
+
+      if (conversationError) {
+        console.error(
+          "SUPPORT CONVERSATION ERROR:",
+          conversationError
+        );
+
+        return res.status(500).json({
+          success: false,
           message:
-            "Unauthorized"
+            "Unable to start support conversation",
+          error: conversationError.message
         });
       }
 
       const conversationId =
+        existingMessage?.conversation_id ||
         crypto.randomUUID();
 
       const {
         data,
         error
-      } =
-        await supabase
-          .from(
-            "support_messages"
-          )
-          .insert({
-            conversation_id:
-              conversationId,
+      } = await supabase
+        .from("support_messages")
+        .insert({
+          conversation_id:
+            conversationId,
 
-            user_id:
-              user_id,
+          sender_type:
+            "user",
 
-            message:
-              String(
-                message
-              ).trim(),
+          sender_id:
+            user_id,
 
-            sender:
-              "user",
+          message:
+            String(message).trim(),
 
-            is_read:
-              false
-          })
-          .select("*")
-          .single();
+          created_at:
+            new Date().toISOString(),
+
+          is_read:
+            false,
+
+          sender:
+            "user",
+
+          user_id:
+            user_id
+        })
+        .select("*")
+        .single();
 
       if (error) {
         console.error(
@@ -797,7 +827,7 @@ app.post(
         return res.status(500).json({
           success: false,
           message:
-            "Unable to send message",
+            "Unable to send support message",
           error:
             error.message
         });
@@ -805,8 +835,7 @@ app.post(
 
       return res.json({
         success: true,
-        message:
-          data
+        message: data
       });
 
     } catch (error) {
@@ -818,11 +847,14 @@ app.post(
       return res.status(500).json({
         success: false,
         message:
-          "Unable to send message"
+          "Unable to send support message",
+        error:
+          error.message
       });
     }
   }
 );
+
 
 /* =====================================================
    ADMIN SUPPORT
@@ -1245,24 +1277,19 @@ app.post(
       ) {
         return res.status(400).json({
           success: false,
-          message:
-            "Message is required"
+          message: "Message is required"
         });
       }
 
+      // Verify customer exists and is not an admin.
       const {
         data: customer,
-        error:
-          customerError
-      } =
-        await supabase
-          .from("profiles")
-          .select("id, is_admin")
-          .eq(
-            "id",
-            user_id
-          )
-          .maybeSingle();
+        error: customerError
+      } = await supabase
+        .from("profiles")
+        .select("id, is_admin")
+        .eq("id", user_id)
+        .maybeSingle();
 
       if (customerError) {
         return res.status(500).json({
@@ -1292,37 +1319,83 @@ app.post(
         });
       }
 
+      // Find the customer's existing conversation.
+      const {
+        data: existingMessage,
+        error: conversationError
+      } = await supabase
+        .from("support_messages")
+        .select("conversation_id")
+        .eq("user_id", user_id)
+        .order("created_at", {
+          ascending: false
+        })
+        .limit(1)
+        .maybeSingle();
+
+      if (conversationError) {
+        console.error(
+          "ADMIN CONVERSATION ERROR:",
+          conversationError
+        );
+
+        return res.status(500).json({
+          success: false,
+          message:
+            "Unable to find support conversation",
+          error:
+            conversationError.message
+        });
+      }
+
+      // Normally this already exists because the customer
+      // started the conversation.
+      if (!existingMessage?.conversation_id) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "No support conversation exists for this customer"
+        });
+      }
+
       const conversationId =
-        crypto.randomUUID();
+        existingMessage.conversation_id;
+
+      const adminId =
+        req.user.id;
 
       const {
         data,
         error
-      } =
-        await supabase
-          .from(
-            "support_messages"
-          )
-          .insert({
-            conversation_id:
-              conversationId,
+      } = await supabase
+        .from("support_messages")
+        .insert({
+          conversation_id:
+            conversationId,
 
-            user_id:
-              user_id,
+          sender_type:
+            "admin",
 
-            message:
-              String(
-                message
-              ).trim(),
+          sender_id:
+            adminId,
 
-            sender:
-              "admin",
+          message:
+            String(message).trim(),
 
-            is_read:
-              false
-          })
-          .select("*")
-          .single();
+          created_at:
+            new Date().toISOString(),
+
+          is_read:
+            false,
+
+          sender:
+            "admin",
+
+          user_id:
+            user_id
+        })
+        .select("*")
+        .single();
 
       if (error) {
         console.error(
@@ -1339,42 +1412,32 @@ app.post(
         });
       }
 
-      /*
-         Optional customer notification.
-      */
-
+      // Create notification for customer.
       try {
         const {
-          error:
-            notificationError
-        } =
-          await supabase
-            .from(
-              "notifications"
-            )
-            .insert({
-              user_id:
-                user_id,
+          error: notificationError
+        } = await supabase
+          .from("notifications")
+          .insert({
+            user_id:
+              user_id,
 
-              title:
-                "New Support Message",
+            title:
+              "New Support Message",
 
-              message:
-                "You have received a new message from Sterling One Bank Support.",
+            message:
+              "You have received a new message from Sterling One Bank Support.",
 
-              type:
-                "system"
-            });
+            type:
+              "system"
+          });
 
-        if (
-          notificationError
-        ) {
+        if (notificationError) {
           console.error(
             "SUPPORT NOTIFICATION ERROR:",
             notificationError
           );
         }
-
       } catch (error) {
         console.error(
           "SUPPORT NOTIFICATION EXCEPTION:",
@@ -1384,8 +1447,7 @@ app.post(
 
       return res.json({
         success: true,
-        message:
-          data
+        message: data
       });
 
     } catch (error) {
@@ -1397,7 +1459,9 @@ app.post(
       return res.status(500).json({
         success: false,
         message:
-          "Unable to send support reply"
+          "Unable to send support reply",
+        error:
+          error.message
       });
     }
   }
