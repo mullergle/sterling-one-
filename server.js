@@ -755,35 +755,68 @@ app.post(
 
       // Find the user's existing conversation.
       const {
-        data: existingMessage,
-        error: conversationError
-      } = await supabase
-        .from("support_messages")
-        .select("conversation_id")
-        .eq("user_id", user_id)
-        .order("created_at", {
-          ascending: false
-        })
-        .limit(1)
-        .maybeSingle();
+  data: existingConversation,
+  error: conversationError
+} = await supabase
+  .from("support_conversations")
+  .select("id")
+  .eq("user_id", user_id)
+  .order("created_at", {
+    ascending: false
+  })
+  .limit(1)
+  .maybeSingle();
 
-      if (conversationError) {
-        console.error(
-          "SUPPORT CONVERSATION ERROR:",
-          conversationError
-        );
+if (conversationError) {
+  console.error(
+    "SUPPORT CONVERSATION ERROR:",
+    conversationError
+  );
 
-        return res.status(500).json({
-          success: false,
-          message:
-            "Unable to start support conversation",
-          error: conversationError.message
-        });
-      }
+  return res.status(500).json({
+    success: false,
+    message:
+      "Unable to find support conversation",
+    error:
+      conversationError.message
+  });
+}
 
-      const conversationId =
-        existingMessage?.conversation_id ||
-        crypto.randomUUID();
+let conversationId =
+  existingConversation?.id;
+
+if (!conversationId) {
+  const {
+    data: newConversation,
+    error: createConversationError
+  } = await supabase
+    .from("support_conversations")
+    .insert({
+      user_id: user_id,
+      subject: "Support Request",
+      status: "open"
+    })
+    .select("id")
+    .single();
+
+  if (createConversationError) {
+    console.error(
+      "CREATE SUPPORT CONVERSATION ERROR:",
+      createConversationError
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        "Unable to create support conversation",
+      error:
+        createConversationError.message
+    });
+  }
+
+  conversationId =
+    newConversation.id;
+}
 
       const {
         data,
