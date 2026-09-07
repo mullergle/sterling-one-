@@ -756,6 +756,9 @@ app.post(
         });
       }
 
+      const conversationId =
+        crypto.randomUUID();
+
       const {
         data,
         error
@@ -765,6 +768,9 @@ app.post(
             "support_messages"
           )
           .insert({
+            conversation_id:
+              conversationId,
+
             user_id:
               user_id,
 
@@ -802,6 +808,7 @@ app.post(
         message:
           data
       });
+
     } catch (error) {
       console.error(
         "SUPPORT POST ERROR:",
@@ -1212,7 +1219,9 @@ app.get(
   }
 );
 
-/*
+
+
+      /*
    Admin sends reply to customer.
 */
 
@@ -1283,6 +1292,9 @@ app.post(
         });
       }
 
+      const conversationId =
+        crypto.randomUUID();
+
       const {
         data,
         error
@@ -1292,6 +1304,9 @@ app.post(
             "support_messages"
           )
           .insert({
+            conversation_id:
+              conversationId,
+
             user_id:
               user_id,
 
@@ -1326,8 +1341,6 @@ app.post(
 
       /*
          Optional customer notification.
-         If notifications table fails, the actual
-         support reply is still preserved.
       */
 
       try {
@@ -1361,6 +1374,7 @@ app.post(
             notificationError
           );
         }
+
       } catch (error) {
         console.error(
           "SUPPORT NOTIFICATION EXCEPTION:",
@@ -1373,6 +1387,7 @@ app.post(
         message:
           data
       });
+
     } catch (error) {
       console.error(
         "ADMIN SUPPORT POST ERROR:",
