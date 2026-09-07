@@ -6,12 +6,7 @@ const crypto = require("crypto");
 
 const supabase = require("./supabase");
 
-const { createClient } = require("@supabase/supabase-js");
 
-const supabaseAuth = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
-);
 
 /* =====================================================
    CONFIG
@@ -1184,7 +1179,7 @@ app.post(
         data,
         error
       } =
-        await supabaseAuth.auth.signInWithPassword(
+        await supabase.auth.signInWithPassword(
           {
             email:
               cleanEmail,
