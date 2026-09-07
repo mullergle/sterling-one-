@@ -1157,12 +1157,10 @@ app.post(
         email,
         password
       } = req.body || {};
-
       const cleanEmail =
         String(email || "")
           .trim()
           .toLowerCase();
-
       if (
         !cleanEmail ||
         !password
@@ -1173,7 +1171,6 @@ app.post(
             "Email and password are required"
         });
       }
-
       const {
         data,
         error
@@ -1182,11 +1179,9 @@ app.post(
           {
             email:
               cleanEmail,
-
             password
           }
         );
-
       if (
         error ||
         !data?.user ||
@@ -1196,21 +1191,17 @@ app.post(
           "LOGIN AUTH ERROR:",
           error
         );
-
         return res.status(401).json({
           success: false,
           message:
             "Invalid email or password"
         });
       }
-
       const user =
         data.user;
-
       /* ---------------------------------------------
          LOAD PROFILE
       --------------------------------------------- */
-
       const {
         data: profile,
         error: profileError
@@ -1218,20 +1209,18 @@ app.post(
         await supabase
           .from("profiles")
           .select(
-            "id, first_name, surname, phone, is_admin, is_suspended"
+            "id, first_name, surname, phone, is_admin"
           )
           .eq(
             "id",
             user.id
           )
           .maybeSingle();
-
       if (profileError) {
         console.error(
           "LOGIN PROFILE ERROR:",
           profileError
         );
-
         return res.status(500).json({
           success: false,
           message:
@@ -1240,7 +1229,6 @@ app.post(
             profileError.message
         });
       }
-
       if (!profile) {
         return res.status(403).json({
           success: false,
@@ -1248,42 +1236,28 @@ app.post(
             "User profile not found"
         });
       }
-
       const isAdmin =
         isAdminValue(
           profile.is_admin
         );
-
-      
-
       return res.json({
         success: true,
-
         message:
           "Login successful",
-
         session:
           data.session,
-
         access_token:
           data.session.access_token,
-
         refresh_token:
           data.session.refresh_token,
-
         token:
           data.session.access_token,
-
         expires_at:
           data.session.expires_at,
-
         expires_in:
           data.session.expires_in,
-
         user,
-
         profile,
-
         is_admin:
           isAdmin
       });
@@ -1292,7 +1266,6 @@ app.post(
         "LOGIN ERROR:",
         error
       );
-
       return res.status(500).json({
         success: false,
         message:
