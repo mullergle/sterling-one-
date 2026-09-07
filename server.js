@@ -820,8 +820,8 @@ app.post(
             is_admin:
               false,
 
-            is_suspended:
-              false
+            
+              
           });
 
       if (profileError) {
