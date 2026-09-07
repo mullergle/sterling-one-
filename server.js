@@ -795,7 +795,7 @@ app.post(
             conversationId,
 
           sender_type:
-            "user",
+  "customer",
 
           sender_id:
             user_id,
