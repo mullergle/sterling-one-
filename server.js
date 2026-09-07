@@ -3459,14 +3459,24 @@ app.get(
       --------------------------------------------- */
 
       const users =
-        (profiles || [])
-          .filter(
-            profile =>
-              !isAdminValue(
-                profile.is_admin
-              )
-          )
-          .map(profile => {
+  (profiles || [])
+    .filter(profile => {
+
+      console.log(
+        "CHECKING PROFILE:",
+        profile.id,
+        profile.first_name,
+        profile.surname,
+        profile.email,
+        "is_admin:",
+        profile.is_admin,
+        "TYPE:",
+        typeof profile.is_admin
+      );
+
+      return profile.is_admin !== true;
+    })
+    .map(profile => {
 
             const authUser =
               authMap.get(
