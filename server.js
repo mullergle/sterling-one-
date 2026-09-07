@@ -4460,12 +4460,14 @@ app.put(
         await supabase
           .from("cards")
           .insert({
-            user_id: userId,
-            account_id: checkingAccount.id,
-            balance: card,
-            card_type: "debit",
-            status: "active"
-          });
+  user_id: userId,
+  account_id: checkingAccount.id,
+  balance: card,
+  card_type: "debit",
+  brand: "Visa",
+  last_four: "0000",
+  status: "active"
+});
 
       if (cardCreateError) {
 
