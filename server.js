@@ -4391,92 +4391,122 @@ app.put(
         }
       }
 
-      /* ---------------------------------------------
-         CARD BALANCE
-      --------------------------------------------- */
+  /* CARD BALANCE */
 
-      try {
-        const {
-          data: cards,
-          error:
-            cardsError
-        } =
-          await supabase
-            .from("cards")
-            .select("id")
-            .eq(
-              "user_id",
-              userId
-            );
+try {
 
-        if (cardsError) {
-          console.error(
-            "CARD LOOKUP ERROR:",
-            cardsError
-          );
-        } else if (
-          cards &&
-          cards.length > 0
-        ) {
-          const {
-            error:
-              cardUpdateError
-          } =
-            await supabase
-              .from("cards")
-              .update({
-                balance:
-                  card
-              })
-              .eq(
-                "user_id",
-                userId
-              );
+  const {
+    data: existingCard,
+    error: cardLookupError
+  } =
+    await supabase
+      .from("cards")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", {
+        ascending: false
+      })
+      .limit(1)
+      .maybeSingle();
 
-          if (cardUpdateError) {
-            console.error(
-              "CARD UPDATE ERROR:",
-              cardUpdateError
-            );
-          }
-        }
-      } catch (error) {
-        console.error(
-          "CARD UPDATE EXCEPTION:",
-          error
+  if (cardLookupError) {
+
+    console.error(
+      "CARD LOOKUP ERROR:",
+      cardLookupError
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        cardLookupError.message
+    });
+
+  }
+
+
+  /* UPDATE EXISTING CARD */
+
+  if (existingCard) {
+
+    const {
+      error: cardUpdateError
+    } =
+      await supabase
+        .from("cards")
+        .update({
+          balance: card
+        })
+        .eq(
+          "id",
+          existingCard.id
         );
-      }
 
-      return res.json({
-        success: true,
+    if (cardUpdateError) {
 
-        message:
-          "User balances updated successfully",
-
-        balances: {
-          checking,
-
-          savings,
-
-          card
-        }
-      });
-    } catch (error) {
       console.error(
-        "ADMIN BALANCE UPDATE ERROR:",
-        error
+        "CARD UPDATE ERROR:",
+        cardUpdateError
       );
 
       return res.status(500).json({
         success: false,
         message:
-          "Unable to update user balances",
-        error:
-          error.message
+          cardUpdateError.message
       });
+
     }
+
   }
-);
+
+
+  /* CREATE CARD IF NONE EXISTS */
+
+  else {
+
+    const {
+      error: cardCreateError
+    } =
+      await supabase
+        .from("cards")
+        .insert({
+          user_id: userId,
+          balance: card
+        });
+
+    if (cardCreateError) {
+
+      console.error(
+        "CARD CREATE ERROR:",
+        cardCreateError
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          cardCreateError.message
+      });
+
+    }
+
+  }
+
+} catch (error) {
+
+  console.error(
+    "CARD BALANCE ERROR:",
+    error
+  );
+
+  return res.status(500).json({
+    success: false,
+    message:
+      "Unable to update card balance",
+    error:
+      error.message
+  });
+
+}
 
 /* =====================================================
    ADMIN WITHDRAWALS
