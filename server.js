@@ -3264,25 +3264,21 @@ app.get(
       --------------------------------------------- */
 
       const {
-  data: profiles,
-  error:
-    profilesError
-} =
-  await supabase
-    .from("profiles")
-    .select("*");
+        data: profiles,
+        error: profilesError
+      } = await supabase
+        .from("profiles")
+        .select("*");
 
-console.log(
-  "SUPABASE URL:",
-  process.env.SUPABASE_URL
-);
+      console.log(
+        "SUPABASE URL:",
+        process.env.SUPABASE_URL
+      );
 
-console.log(
-  "SERVICE ROLE KEY LOADED:",
-  !!process.env.SUPABASE_SERVICE_ROLE_KEY
-);
-
-if (profilesError) {
+      console.log(
+        "SERVICE ROLE KEY LOADED:",
+        !!process.env.SUPABASE_SERVICE_ROLE_KEY
+      );
 
       if (profilesError) {
         console.error(
@@ -3296,20 +3292,20 @@ if (profilesError) {
           error: profilesError.message
         });
       }
-      
-            console.log(
-  "PROFILES COUNT:",
-  profiles?.length
-);
 
-console.log(
-  "PROFILE ADMIN VALUES:",
-  (profiles || []).map(profile => ({
-    id: profile.id,
-    email: profile.email,
-    is_admin: profile.is_admin
-  }))
-);
+      console.log(
+        "PROFILES COUNT:",
+        profiles?.length
+      );
+
+      console.log(
+        "PROFILE ADMIN VALUES:",
+        (profiles || []).map(profile => ({
+          id: profile.id,
+          email: profile.email,
+          is_admin: profile.is_admin
+        }))
+      );
 
       /* ---------------------------------------------
          ACCOUNTS
@@ -3407,10 +3403,6 @@ console.log(
         );
       }
 
-      /* ---------------------------------------------
-         MAP AUTH USERS
-      --------------------------------------------- */
-
       const authMap = new Map();
 
       authUsers.forEach(user => {
@@ -3421,7 +3413,7 @@ console.log(
       });
 
       /* ---------------------------------------------
-         MAP ACCOUNTS
+         ACCOUNTS BY USER
       --------------------------------------------- */
 
       const accountsByUser = new Map();
@@ -3448,7 +3440,7 @@ console.log(
       });
 
       /* ---------------------------------------------
-         MAP BALANCES
+         BALANCE MAP
       --------------------------------------------- */
 
       const balanceMap = new Map();
@@ -3463,15 +3455,16 @@ console.log(
       });
 
       /* ---------------------------------------------
-         CUSTOMERS ONLY
+         BUILD USERS
       --------------------------------------------- */
 
       const users =
         (profiles || [])
-          .filter(profile =>
-            !isAdminValue(
-              profile.is_admin
-            )
+          .filter(
+            profile =>
+              !isAdminValue(
+                profile.is_admin
+              )
           )
           .map(profile => {
 
@@ -3485,7 +3478,6 @@ console.log(
                 profile.id
               ) || [];
 
-            /* Prefer checking account */
             const account =
               userAccounts.find(
                 item =>
@@ -3539,12 +3531,11 @@ console.log(
                 "No email",
 
               phone:
-                profile.phone ||
-                "",
+                profile.phone || "",
 
               balance,
 
-              account: account,
+              account,
 
               account_balance:
                 accountBalance,
@@ -3561,10 +3552,11 @@ console.log(
 
       return res.json({
         success: true,
-        users: users
+        users
       });
 
     } catch (error) {
+
       console.error(
         "ADMIN USERS ERROR:",
         error
