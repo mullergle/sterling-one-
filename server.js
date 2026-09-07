@@ -4464,79 +4464,35 @@ try {
 
   else {
 
-    const {
-      error: cardCreateError
-    } =
-      await supabase
-        .from("cards")
-        .insert({
-          user_id: userId,
-          balance: card
-        });
-
-    if (cardCreateError) {
-
-      console.error(
-        "CARD CREATE ERROR:",
-        cardCreateError
-      );
-
-      return res.status(500).json({
-        success: false,
-        message:
-          cardCreateError.message
+  const {
+    error: cardCreateError
+  } =
+    await supabase
+      .from("cards")
+      .insert({
+        user_id: userId,
+        account_id: checkingAccount.id,
+        balance: card,
+        card_type: "debit",
+        status: "active"
       });
 
-    }
+  if (cardCreateError) {
+
+    console.error(
+      "CARD CREATE ERROR:",
+      cardCreateError
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        cardCreateError.message
+    });
 
   }
-
-} catch (error) {
-
-  console.error(
-    "CARD BALANCE ERROR:",
-    error
-  );
-
-  return res.status(500).json({
-    success: false,
-    message:
-      "Unable to update card balance",
-    error:
-      error.message
-  });
 
 }
-
-      return res.json({
-        success: true,
-        message:
-          "User balances updated successfully",
-        balances: {
-          checking,
-          savings,
-          card
-        }
-      });
-
-    } catch (error) {
-
-      console.error(
-        "ADMIN BALANCE UPDATE ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        message:
-          "Unable to update user balances",
-        error:
-          error.message
-      });
-
-    }
-  }
-);
 
 /* =====================================================
    ADMIN WITHDRAWALS
