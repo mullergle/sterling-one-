@@ -3261,20 +3261,14 @@ app.get(
 
       /* ---------------------------------------------
          PROFILES
-
-         Do NOT order by created_at.
-         This avoids failure if that column does
-         not exist in the profiles table.
       --------------------------------------------- */
 
       const {
         data: profiles,
-        error:
-          profilesError
-      } =
-        await supabase
-          .from("profiles")
-          .select("*");
+        error: profilesError
+      } = await supabase
+        .from("profiles")
+        .select("*");
 
       if (profilesError) {
         console.error(
@@ -3284,10 +3278,8 @@ app.get(
 
         return res.status(500).json({
           success: false,
-          message:
-            "Unable to load user profiles",
-          error:
-            profilesError.message
+          message: "Unable to load user profiles",
+          error: profilesError.message
         });
       }
 
@@ -3297,12 +3289,10 @@ app.get(
 
       const {
         data: accounts,
-        error:
-          accountsError
-      } =
-        await supabase
-          .from("accounts")
-          .select("*");
+        error: accountsError
+      } = await supabase
+        .from("accounts")
+        .select("*");
 
       if (accountsError) {
         console.error(
@@ -3312,10 +3302,8 @@ app.get(
 
         return res.status(500).json({
           success: false,
-          message:
-            "Unable to load accounts",
-          error:
-            accountsError.message
+          message: "Unable to load accounts",
+          error: accountsError.message
         });
       }
 
@@ -3325,14 +3313,10 @@ app.get(
 
       const {
         data: balances,
-        error:
-          balancesError
-      } =
-        await supabase
-          .from(
-            "account_balances"
-          )
-          .select("*");
+        error: balancesError
+      } = await supabase
+        .from("account_balances")
+        .select("*");
 
       if (balancesError) {
         console.error(
@@ -3342,22 +3326,16 @@ app.get(
 
         return res.status(500).json({
           success: false,
-          message:
-            "Unable to load account balances",
-          error:
-            balancesError.message
+          message: "Unable to load account balances",
+          error: balancesError.message
         });
       }
 
       /* ---------------------------------------------
          AUTH USERS
-
-         Load all pages instead of only the first
-         1,000 users.
       --------------------------------------------- */
 
-      let authUsers =
-        [];
+      let authUsers = [];
 
       try {
         for (
@@ -3366,17 +3344,13 @@ app.get(
           page++
         ) {
           const {
-            data:
-              authData,
-            error:
-              authError
+            data: authData,
+            error: authError
           } =
-            await supabase.auth.admin
-              .listUsers({
-                page,
-                perPage:
-                  1000
-              });
+            await supabase.auth.admin.listUsers({
+              page,
+              perPage: 1000
+            });
 
           if (authError) {
             console.error(
@@ -3387,17 +3361,13 @@ app.get(
           }
 
           const pageUsers =
-            authData?.users ||
-            [];
+            authData?.users || [];
 
           authUsers =
-            authUsers.concat(
-              pageUsers
-            );
+            authUsers.concat(pageUsers);
 
           if (
-            pageUsers.length <
-            1000
+            pageUsers.length < 1000
           ) {
             break;
           }
@@ -3410,70 +3380,59 @@ app.get(
       }
 
       /* ---------------------------------------------
-         MAPS
+         MAP AUTH USERS
       --------------------------------------------- */
 
-      const authMap =
-        new Map();
+      const authMap = new Map();
 
-      authUsers.forEach(
-        user => {
-          authMap.set(
-            user.id,
-            user
+      authUsers.forEach(user => {
+        authMap.set(
+          user.id,
+          user
+        );
+      });
+
+      /* ---------------------------------------------
+         MAP ACCOUNTS
+      --------------------------------------------- */
+
+      const accountsByUser = new Map();
+
+      (accounts || []).forEach(account => {
+        if (!account.user_id) {
+          return;
+        }
+
+        if (
+          !accountsByUser.has(
+            account.user_id
+          )
+        ) {
+          accountsByUser.set(
+            account.user_id,
+            []
           );
         }
-      );
 
-      const accountsByUser =
-        new Map();
+        accountsByUser
+          .get(account.user_id)
+          .push(account);
+      });
 
-      (
-        accounts || []
-      ).forEach(
-        account => {
-          if (
-            !account.user_id
-          ) {
-            return;
-          }
+      /* ---------------------------------------------
+         MAP BALANCES
+      --------------------------------------------- */
 
-          if (
-            !accountsByUser.has(
-              account.user_id
-            )
-          ) {
-            accountsByUser.set(
-              account.user_id,
-              []
-            );
-          }
+      const balanceMap = new Map();
 
-          accountsByUser
-            .get(
-              account.user_id
-            )
-            .push(account);
+      (balances || []).forEach(balance => {
+        if (balance.account_id) {
+          balanceMap.set(
+            balance.account_id,
+            balance
+          );
         }
-      );
-
-      const balanceMap =
-        new Map();
-
-      (
-        balances || []
-      ).forEach(
-        balance => {
-          if (
-            balance.account_id
-          ) {
-            balanceMap.set(
-              balance.account_id,
-              balance
-            );
-          }
-        }
-      );
+      });
 
       /* ---------------------------------------------
          CUSTOMERS ONLY
@@ -3481,108 +3440,91 @@ app.get(
 
       const users =
         (profiles || [])
-          .filter(
-            profile =>
-              !isAdminValue(
-                profile.is_admin
-              )
+          .filter(profile =>
+            !isAdminValue(
+              profile.is_admin
+            )
           )
-          .map(
-            profile => {
-              const authUser =
-                authMap.get(
-                  profile.id
-                );
+          .map(profile => {
 
-              const userAccounts =
-                accountsByUser.get(
-                  profile.id
-                ) || [];
+            const authUser =
+              authMap.get(
+                profile.id
+              );
 
-              /*
-                Prefer checking account.
-              */
-              const account =
-                userAccounts.find(
-                  item =>
-                    String(
-                      item.account_type ||
-                        ""
-                    ).toLowerCase() ===
-                    "checking"
-                ) ||
-                userAccounts[0] ||
-                null;
+            const userAccounts =
+              accountsByUser.get(
+                profile.id
+              ) || [];
 
-              const accountBalance =
-                account
-                  ? balanceMap.get(
-                      account.id
-                    )
-                  : null;
+            /* Prefer checking account */
+            const account =
+              userAccounts.find(
+                item =>
+                  String(
+                    item.account_type || ""
+                  ).toLowerCase() ===
+                  "checking"
+              ) ||
+              userAccounts[0] ||
+              null;
 
-              const firstName =
-                profile.first_name ||
-                "";
+            const accountBalance =
+              account
+                ? balanceMap.get(
+                    account.id
+                  )
+                : null;
 
-              const surname =
-                profile.surname ||
-                "";
+            const firstName =
+              profile.first_name || "";
 
-              const fullName =
-                `${firstName} ${surname}`
-                  .trim() ||
-                "Unnamed User";
+            const surname =
+              profile.surname || "";
 
-              const balance =
-                Number(
-                  accountBalance
-                    ?.available_balance ??
-                    accountBalance
-                      ?.balance ??
-                    0
-                );
+            const fullName =
+              `${firstName} ${surname}`
+                .trim() ||
+              "Unnamed User";
 
-              return {
-                id:
-                  profile.id,
+            const balance =
+              Number(
+                accountBalance
+                  ?.available_balance ??
+                accountBalance
+                  ?.balance ??
+                0
+              );
 
-                full_name:
-                  fullName,
+            return {
+              id: profile.id,
 
-                first_name:
-                  firstName,
+              full_name: fullName,
 
-                surname:
-                  surname,
+              first_name: firstName,
 
-                email:
-                  authUser?.email ||
-                  profile.email ||
-                  "No email",
+              surname: surname,
 
-                phone:
-                  profile.phone ||
-                  "",
+              email:
+                authUser?.email ||
+                profile.email ||
+                "No email",
 
-                balance,
+              phone:
+                profile.phone ||
+                "",
 
-                is_suspended:
-                  isSuspendedValue(
-                    profile.is_suspended
-                  ),
+              balance,
 
-                account:
-                  account,
+              account: account,
 
-                account_balance:
-                  accountBalance,
+              account_balance:
+                accountBalance,
 
-                accounts:
-                  userAccounts
-              };
-            }
-          );
+              accounts:
+                userAccounts
+            };
+          });
 
       console.log(
         "ADMIN USERS RETURNED:",
@@ -3591,8 +3533,9 @@ app.get(
 
       return res.json({
         success: true,
-        users
+        users: users
       });
+
     } catch (error) {
       console.error(
         "ADMIN USERS ERROR:",
@@ -3601,10 +3544,8 @@ app.get(
 
       return res.status(500).json({
         success: false,
-        message:
-          "Unable to load users",
-        error:
-          error.message
+        message: "Unable to load users",
+        error: error.message
       });
     }
   }
