@@ -4508,6 +4508,36 @@ try {
 
 }
 
+      return res.json({
+        success: true,
+        message:
+          "User balances updated successfully",
+        balances: {
+          checking,
+          savings,
+          card
+        }
+      });
+
+    } catch (error) {
+
+      console.error(
+        "ADMIN BALANCE UPDATE ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to update user balances",
+        error:
+          error.message
+      });
+
+    }
+  }
+);
+
 /* =====================================================
    ADMIN WITHDRAWALS
 ===================================================== */
