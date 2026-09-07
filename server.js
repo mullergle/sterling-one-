@@ -3,12 +3,11 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
+const { createClient } = require("@supabase/supabase-js");
 
 const supabase = require("./supabase");
 
 const app = express();
-
-
 
 /* =====================================================
    CONFIG
@@ -83,10 +82,11 @@ app.get(
   "/api/test-supabase",
   async (req, res) => {
     try {
-      const { error } = await supabase
-        .from("profiles")
-        .select("id")
-        .limit(1);
+      const { error } =
+        await supabase
+          .from("profiles")
+          .select("id")
+          .limit(1);
 
       if (error) {
         console.error(
@@ -158,9 +158,6 @@ function isSuspendedValue(value) {
   );
 }
 
-/*
-  Accept common checkbox/form values.
-*/
 function isAccepted(value) {
   if (value === true) return true;
   if (value === 1) return true;
@@ -179,11 +176,10 @@ function isAccepted(value) {
   );
 }
 
-/*
-  Generate a unique 10-digit account number.
+/* =====================================================
+   ACCOUNT NUMBER
+===================================================== */
 
-  Starts with 4, matching the previous system.
-*/
 async function generateAccountNumber() {
   for (let attempt = 0; attempt < 50; attempt++) {
     const number =
@@ -196,14 +192,15 @@ async function generateAccountNumber() {
     const {
       data,
       error
-    } = await supabase
-      .from("accounts")
-      .select("id")
-      .eq(
-        "account_number",
-        number
-      )
-      .limit(1);
+    } =
+      await supabase
+        .from("accounts")
+        .select("id")
+        .eq(
+          "account_number",
+          number
+        )
+        .limit(1);
 
     if (error) {
       console.error(
@@ -229,9 +226,10 @@ async function generateAccountNumber() {
   );
 }
 
-/*
-  Safely remove records created during registration.
-*/
+/* =====================================================
+   REGISTRATION CLEANUP
+===================================================== */
+
 async function cleanupRegistration(
   userId,
   accountId = null
@@ -240,15 +238,14 @@ async function cleanupRegistration(
 
   try {
     if (accountId) {
-      const {
-        error
-      } = await supabase
-        .from("account_balances")
-        .delete()
-        .eq(
-          "account_id",
-          accountId
-        );
+      const { error } =
+        await supabase
+          .from("account_balances")
+          .delete()
+          .eq(
+            "account_id",
+            accountId
+          );
 
       if (error) {
         console.error(
@@ -266,19 +263,18 @@ async function cleanupRegistration(
 
   try {
     if (accountId) {
-      const {
-        error
-      } = await supabase
-        .from("accounts")
-        .delete()
-        .eq(
-          "id",
-          accountId
-        )
-        .eq(
-          "user_id",
-          userId
-        );
+      const { error } =
+        await supabase
+          .from("accounts")
+          .delete()
+          .eq(
+            "id",
+            accountId
+          )
+          .eq(
+            "user_id",
+            userId
+          );
 
       if (error) {
         console.error(
@@ -295,15 +291,14 @@ async function cleanupRegistration(
   }
 
   try {
-    const {
-      error
-    } = await supabase
-      .from("customer_addresses")
-      .delete()
-      .eq(
-        "user_id",
-        userId
-      );
+    const { error } =
+      await supabase
+        .from("customer_addresses")
+        .delete()
+        .eq(
+          "user_id",
+          userId
+        );
 
     if (error) {
       console.error(
@@ -319,15 +314,14 @@ async function cleanupRegistration(
   }
 
   try {
-    const {
-      error
-    } = await supabase
-      .from("customer_consents")
-      .delete()
-      .eq(
-        "user_id",
-        userId
-      );
+    const { error } =
+      await supabase
+        .from("customer_consents")
+        .delete()
+        .eq(
+          "user_id",
+          userId
+        );
 
     if (error) {
       console.error(
@@ -343,15 +337,14 @@ async function cleanupRegistration(
   }
 
   try {
-    const {
-      error
-    } = await supabase
-      .from("notifications")
-      .delete()
-      .eq(
-        "user_id",
-        userId
-      );
+    const { error } =
+      await supabase
+        .from("notifications")
+        .delete()
+        .eq(
+          "user_id",
+          userId
+        );
 
     if (error) {
       console.error(
@@ -367,15 +360,14 @@ async function cleanupRegistration(
   }
 
   try {
-    const {
-      error
-    } = await supabase
-      .from("profiles")
-      .delete()
-      .eq(
-        "id",
-        userId
-      );
+    const { error } =
+      await supabase
+        .from("profiles")
+        .delete()
+        .eq(
+          "id",
+          userId
+        );
 
     if (error) {
       console.error(
@@ -391,9 +383,7 @@ async function cleanupRegistration(
   }
 
   try {
-    const {
-      error
-    } =
+    const { error } =
       await supabase.auth.admin.deleteUser(
         userId
       );
@@ -644,108 +634,818 @@ async function authenticateAdmin(
   }
 }
 
-// =====================================================
-// SUPPORT CHAT
-// =====================================================
+/* =====================================================
+   CUSTOMER SUPPORT CHAT
+   CURRENT SUPPORT SYSTEM
+===================================================== */
 
-app.get("/support/messages/:userId", authenticate, async (req, res) => {
-  try {
-    const { userId } = req.params;
+/*
+   Customer loads their own messages
+*/
 
-    if (req.user.id !== userId) {
-      return res.status(403).json({
-        success: false,
-        message: "Unauthorized"
+app.get(
+  "/support/messages/:userId",
+  authenticate,
+  async (req, res) => {
+    try {
+      const {
+        userId
+      } = req.params;
+
+      if (
+        req.user.id !==
+        userId
+      ) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Unauthorized"
+        });
+      }
+
+      const {
+        data,
+        error
+      } =
+        await supabase
+          .from(
+            "support_messages"
+          )
+          .select("*")
+          .eq(
+            "user_id",
+            userId
+          )
+          .order(
+            "created_at",
+            {
+              ascending:
+                true
+            }
+          );
+
+      if (error) {
+        console.error(
+          "SUPPORT LOAD ERROR:",
+          error
+        );
+
+        return res.status(500).json({
+          success: false,
+          message:
+            "Unable to load messages",
+          error:
+            error.message
+        });
+      }
+
+      return res.json({
+        success: true,
+        messages:
+          data || []
       });
-    }
-
-    const { data, error } = await supabase
-      .from("support_messages")
-      .select("*")
-      .eq("user_id", userId)
-      .order("created_at", {
-        ascending: true
-      });
-
-    if (error) {
-      console.error("SUPPORT LOAD ERROR:", error);
+    } catch (error) {
+      console.error(
+        "SUPPORT GET ERROR:",
+        error
+      );
 
       return res.status(500).json({
         success: false,
-        message: "Unable to load messages",
-        error: error.message
+        message:
+          "Unable to load messages"
       });
     }
-
-    return res.json({
-      success: true,
-      messages: data || []
-    });
-
-  } catch (error) {
-    console.error("SUPPORT GET ERROR:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Unable to load messages"
-    });
   }
-});
+);
 
+/*
+   Customer sends message
+*/
 
-app.post("/support/messages", authenticate, async (req, res) => {
-  try {
-    const { user_id, message } = req.body || {};
+app.post(
+  "/support/messages",
+  authenticate,
+  async (req, res) => {
+    try {
+      const {
+        user_id,
+        message
+      } = req.body || {};
 
-    if (!user_id || !message || !String(message).trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Message is required"
+      if (
+        !user_id ||
+        !message ||
+        !String(message).trim()
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Message is required"
+        });
+      }
+
+      if (
+        req.user.id !==
+        user_id
+      ) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Unauthorized"
+        });
+      }
+
+      const {
+        data,
+        error
+      } =
+        await supabase
+          .from(
+            "support_messages"
+          )
+          .insert({
+            user_id:
+              user_id,
+
+            message:
+              String(
+                message
+              ).trim(),
+
+            sender:
+              "user",
+
+            is_read:
+              false
+          })
+          .select("*")
+          .single();
+
+      if (error) {
+        console.error(
+          "SUPPORT SEND ERROR:",
+          error
+        );
+
+        return res.status(500).json({
+          success: false,
+          message:
+            "Unable to send message",
+          error:
+            error.message
+        });
+      }
+
+      return res.json({
+        success: true,
+        message:
+          data
       });
-    }
-
-    if (req.user.id !== user_id) {
-      return res.status(403).json({
-        success: false,
-        message: "Unauthorized"
-      });
-    }
-
-    const { data, error } = await supabase
-      .from("support_messages")
-      .insert({
-        user_id: user_id,
-        message: String(message).trim(),
-        sender: "user",
-        is_read: false
-      })
-      .select("*")
-      .single();
-
-    if (error) {
-      console.error("SUPPORT SEND ERROR:", error);
+    } catch (error) {
+      console.error(
+        "SUPPORT POST ERROR:",
+        error
+      );
 
       return res.status(500).json({
         success: false,
-        message: "Unable to send message",
-        error: error.message
+        message:
+          "Unable to send message"
       });
     }
-
-    return res.json({
-      success: true,
-      message: data
-    });
-
-  } catch (error) {
-    console.error("SUPPORT POST ERROR:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Unable to send message"
-    });
   }
-});
+);
+
+/* =====================================================
+   ADMIN SUPPORT
+===================================================== */
+
+/*
+   Admin loads all users for support.
+   Supports both the current admin page path
+   and the API path.
+*/
+
+app.get(
+  [
+    "/admin/users",
+    "/api/admin/users"
+  ],
+  authenticateAdmin,
+  async (req, res) => {
+    try {
+      const {
+        data: profiles,
+        error: profilesError
+      } =
+        await supabase
+          .from("profiles")
+          .select("*");
+
+      if (profilesError) {
+        console.error(
+          "ADMIN USERS PROFILE ERROR:",
+          profilesError
+        );
+
+        return res.status(500).json({
+          success: false,
+          message:
+            "Unable to load user profiles",
+          error:
+            profilesError.message
+        });
+      }
+
+      const {
+        data: accounts,
+        error: accountsError
+      } =
+        await supabase
+          .from("accounts")
+          .select("*");
+
+      if (accountsError) {
+        return res.status(500).json({
+          success: false,
+          message:
+            "Unable to load accounts",
+          error:
+            accountsError.message
+        });
+      }
+
+      const {
+        data: balances,
+        error: balancesError
+      } =
+        await supabase
+          .from(
+            "account_balances"
+          )
+          .select("*");
+
+      if (balancesError) {
+        return res.status(500).json({
+          success: false,
+          message:
+            "Unable to load account balances",
+          error:
+            balancesError.message
+        });
+      }
+
+      let authUsers = [];
+
+      try {
+        for (
+          let page = 1;
+          page <= 20;
+          page++
+        ) {
+          const {
+            data: authData,
+            error: authError
+          } =
+            await supabase.auth.admin
+              .listUsers({
+                page,
+                perPage: 1000
+              });
+
+          if (authError) {
+            console.error(
+              "ADMIN AUTH USERS ERROR:",
+              authError
+            );
+
+            break;
+          }
+
+          const pageUsers =
+            authData?.users || [];
+
+          authUsers =
+            authUsers.concat(
+              pageUsers
+            );
+
+          if (
+            pageUsers.length <
+            1000
+          ) {
+            break;
+          }
+        }
+      } catch (error) {
+        console.error(
+          "ADMIN AUTH USERS EXCEPTION:",
+          error
+        );
+      }
+
+      const authMap =
+        new Map();
+
+      authUsers.forEach(
+        user => {
+          authMap.set(
+            user.id,
+            user
+          );
+        }
+      );
+
+      const accountsByUser =
+        new Map();
+
+      (
+        accounts || []
+      ).forEach(
+        account => {
+          if (
+            !account.user_id
+          ) {
+            return;
+          }
+
+          if (
+            !accountsByUser.has(
+              account.user_id
+            )
+          ) {
+            accountsByUser.set(
+              account.user_id,
+              []
+            );
+          }
+
+          accountsByUser
+            .get(
+              account.user_id
+            )
+            .push(account);
+        }
+      );
+
+      const balanceMap =
+        new Map();
+
+      (
+        balances || []
+      ).forEach(
+        balance => {
+          if (
+            balance.account_id
+          ) {
+            balanceMap.set(
+              balance.account_id,
+              balance
+            );
+          }
+        }
+      );
+
+      const users =
+        (profiles || [])
+          .filter(
+            profile =>
+              !isAdminValue(
+                profile.is_admin
+              )
+          )
+          .map(
+            profile => {
+              const authUser =
+                authMap.get(
+                  profile.id
+                );
+
+              const userAccounts =
+                accountsByUser.get(
+                  profile.id
+                ) || [];
+
+              const account =
+                userAccounts.find(
+                  item =>
+                    String(
+                      item.account_type ||
+                        ""
+                    ).toLowerCase() ===
+                    "checking"
+                ) ||
+                userAccounts[0] ||
+                null;
+
+              const accountBalance =
+                account
+                  ? balanceMap.get(
+                      account.id
+                    )
+                  : null;
+
+              const firstName =
+                profile.first_name ||
+                "";
+
+              const surname =
+                profile.surname ||
+                "";
+
+              const fullName =
+                `${firstName} ${surname}`
+                  .trim() ||
+                "Unnamed User";
+
+              const balance =
+                Number(
+                  accountBalance
+                    ?.available_balance ??
+                    accountBalance
+                      ?.balance ??
+                    0
+                );
+
+              return {
+                id:
+                  profile.id,
+
+                full_name:
+                  fullName,
+
+                first_name:
+                  firstName,
+
+                surname:
+                  surname,
+
+                email:
+                  authUser?.email ||
+                  profile.email ||
+                  "No email",
+
+                phone:
+                  profile.phone ||
+                  "",
+
+                balance,
+
+                account,
+
+                account_balance:
+                  accountBalance,
+
+                accounts:
+                  userAccounts
+              };
+            }
+          );
+
+      return res.json({
+        success: true,
+        users
+      });
+    } catch (error) {
+      console.error(
+        "ADMIN USERS ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to load users",
+        error:
+          error.message
+      });
+    }
+  }
+);
+
+/*
+   Admin loads messages for one customer.
+*/
+
+app.get(
+  [
+    "/admin/support/messages/:userId",
+    "/api/admin/support/messages/:userId"
+  ],
+  authenticateAdmin,
+  async (req, res) => {
+    try {
+      const {
+        userId
+      } = req.params;
+
+      const {
+        data,
+        error
+      } =
+        await supabase
+          .from(
+            "support_messages"
+          )
+          .select("*")
+          .eq(
+            "user_id",
+            userId
+          )
+          .order(
+            "created_at",
+            {
+              ascending:
+                true
+            }
+          );
+
+      if (error) {
+        console.error(
+          "ADMIN SUPPORT LOAD ERROR:",
+          error
+        );
+
+        return res.status(500).json({
+          success: false,
+          message:
+            "Unable to load support messages",
+          error:
+            error.message
+        });
+      }
+
+      return res.json({
+        success: true,
+        messages:
+          data || []
+      });
+    } catch (error) {
+      console.error(
+        "ADMIN SUPPORT GET ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to load support messages"
+      });
+    }
+  }
+);
+
+/*
+   Admin sends reply to customer.
+*/
+
+app.post(
+  [
+    "/admin/support/messages",
+    "/api/admin/support/messages"
+  ],
+  authenticateAdmin,
+  async (req, res) => {
+    try {
+      const {
+        user_id,
+        message
+      } = req.body || {};
+
+      if (
+        !user_id ||
+        !message ||
+        !String(message).trim()
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Message is required"
+        });
+      }
+
+      const {
+        data: customer,
+        error:
+          customerError
+      } =
+        await supabase
+          .from("profiles")
+          .select("id, is_admin")
+          .eq(
+            "id",
+            user_id
+          )
+          .maybeSingle();
+
+      if (customerError) {
+        return res.status(500).json({
+          success: false,
+          message:
+            customerError.message
+        });
+      }
+
+      if (!customer) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "Customer not found"
+        });
+      }
+
+      if (
+        isAdminValue(
+          customer.is_admin
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid support customer"
+        });
+      }
+
+      const {
+        data,
+        error
+      } =
+        await supabase
+          .from(
+            "support_messages"
+          )
+          .insert({
+            user_id:
+              user_id,
+
+            message:
+              String(
+                message
+              ).trim(),
+
+            sender:
+              "admin",
+
+            is_read:
+              false
+          })
+          .select("*")
+          .single();
+
+      if (error) {
+        console.error(
+          "ADMIN SUPPORT SEND ERROR:",
+          error
+        );
+
+        return res.status(500).json({
+          success: false,
+          message:
+            "Unable to send support reply",
+          error:
+            error.message
+        });
+      }
+
+      /*
+         Optional customer notification.
+         If notifications table fails, the actual
+         support reply is still preserved.
+      */
+
+      try {
+        const {
+          error:
+            notificationError
+        } =
+          await supabase
+            .from(
+              "notifications"
+            )
+            .insert({
+              user_id:
+                user_id,
+
+              title:
+                "New Support Message",
+
+              message:
+                "You have received a new message from Sterling One Bank Support.",
+
+              type:
+                "system"
+            });
+
+        if (
+          notificationError
+        ) {
+          console.error(
+            "SUPPORT NOTIFICATION ERROR:",
+            notificationError
+          );
+        }
+      } catch (error) {
+        console.error(
+          "SUPPORT NOTIFICATION EXCEPTION:",
+          error
+        );
+      }
+
+      return res.json({
+        success: true,
+        message:
+          data
+      });
+    } catch (error) {
+      console.error(
+        "ADMIN SUPPORT POST ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to send support reply"
+      });
+    }
+  }
+);
+
+/*
+   Admin marks customer's messages as read.
+*/
+
+app.put(
+  [
+    "/admin/support/messages/:userId/read",
+    "/api/admin/support/messages/:userId/read"
+  ],
+  authenticateAdmin,
+  async (req, res) => {
+    try {
+      const {
+        userId
+      } = req.params;
+
+      const {
+        error
+      } =
+        await supabase
+          .from(
+            "support_messages"
+          )
+          .update({
+            is_read:
+              true
+          })
+          .eq(
+            "user_id",
+            userId
+          )
+          .eq(
+            "sender",
+            "user"
+          )
+          .eq(
+            "is_read",
+            false
+          );
+
+      if (error) {
+        console.error(
+          "ADMIN SUPPORT READ ERROR:",
+          error
+        );
+
+        return res.status(500).json({
+          success: false,
+          message:
+            "Unable to mark messages as read",
+          error:
+            error.message
+        });
+      }
+
+      return res.json({
+        success: true,
+        message:
+          "Messages marked as read"
+      });
+    } catch (error) {
+      console.error(
+        "ADMIN SUPPORT READ EXCEPTION:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to mark messages as read"
+      });
+    }
+  }
+);
 
 /* =====================================================
    REGISTER
@@ -845,7 +1545,8 @@ app.post(
       }
 
       if (
-        String(pass).length < 8
+        String(pass).length <
+        8
       ) {
         return res.status(400).json({
           success: false,
@@ -854,16 +1555,12 @@ app.post(
         });
       }
 
-      /* ---------------------------------------------
-         CREATE AUTH USER
-      --------------------------------------------- */
-
       const {
         data: authData,
         error: authError
       } =
-        await supabase.auth.admin.createUser(
-          {
+        await supabase.auth.admin
+          .createUser({
             email:
               cleanEmail,
 
@@ -872,8 +1569,7 @@ app.post(
 
             email_confirm:
               true
-          }
-        );
+          });
 
       if (
         authError ||
@@ -895,10 +1591,6 @@ app.post(
       createdUserId =
         authData.user.id;
 
-      /* ---------------------------------------------
-         CREATE PROFILE
-      --------------------------------------------- */
-
       const {
         error: profileError
       } =
@@ -919,14 +1611,13 @@ app.post(
 
             ssn:
               ssn
-                ? String(ssn).trim()
+                ? String(
+                    ssn
+                  ).trim()
                 : null,
 
             is_admin:
-              false,
-
-            
-              
+              false
           });
 
       if (profileError) {
@@ -947,10 +1638,6 @@ app.post(
             profileError.message
         });
       }
-
-      /* ---------------------------------------------
-         ADDRESS
-      --------------------------------------------- */
 
       const {
         error: addressError
@@ -994,10 +1681,6 @@ app.post(
             addressError.message
         });
       }
-
-      /* ---------------------------------------------
-         ACCOUNT
-      --------------------------------------------- */
 
       const accountNumber =
         await generateAccountNumber();
@@ -1052,15 +1735,13 @@ app.post(
       createdAccountId =
         account.id;
 
-      /* ---------------------------------------------
-         ACCOUNT BALANCE
-      --------------------------------------------- */
-
       const {
         error: balanceError
       } =
         await supabase
-          .from("account_balances")
+          .from(
+            "account_balances"
+          )
           .insert({
             account_id:
               account.id,
@@ -1091,10 +1772,6 @@ app.post(
             balanceError.message
         });
       }
-
-      /* ---------------------------------------------
-         OPTIONAL CONSENT
-      --------------------------------------------- */
 
       try {
         const {
@@ -1128,10 +1805,6 @@ app.post(
         );
       }
 
-      /* ---------------------------------------------
-         OPTIONAL PRIVACY CONSENT
-      --------------------------------------------- */
-
       try {
         const {
           error
@@ -1163,10 +1836,6 @@ app.post(
           error
         );
       }
-
-      /* ---------------------------------------------
-         OPTIONAL WELCOME NOTIFICATION
-      --------------------------------------------- */
 
       try {
         const {
@@ -1202,10 +1871,6 @@ app.post(
           error
         );
       }
-
-      /* ---------------------------------------------
-         SUCCESS
-      --------------------------------------------- */
 
       return res.status(201).json({
         success: true,
@@ -1254,67 +1919,73 @@ app.post(
    LOGIN
 ===================================================== */
 
-const { createClient } = require("@supabase/supabase-js");
-
 app.post(
   "/api/auth/login",
   async (req, res) => {
     try {
-
-      const { email, password } = req.body || {};
+      const {
+        email,
+        password
+      } = req.body || {};
 
       const cleanEmail =
         String(email || "")
           .trim()
           .toLowerCase();
 
-      if (!cleanEmail || !password) {
+      if (
+        !cleanEmail ||
+        !password
+      ) {
         return res.status(400).json({
           success: false,
-          message: "Email and password are required"
+          message:
+            "Email and password are required"
         });
       }
 
+      /*
+         IMPORTANT:
+         Use a separate auth client so
+         signInWithPassword does not alter
+         the global service-role client.
+      */
 
-      // =====================================================
-      // CREATE A SEPARATE AUTH CLIENT
-      // This prevents login from changing the global
-      // service-role Supabase client's session.
-      // =====================================================
+      const authClient =
+        createClient(
+          process.env.SUPABASE_URL,
+          process.env.SUPABASE_SERVICE_ROLE_KEY,
+          {
+            auth: {
+              persistSession:
+                false,
 
-      const authClient = createClient(
-        process.env.SUPABASE_URL,
-        process.env.SUPABASE_SERVICE_ROLE_KEY,
-        {
-          auth: {
-            persistSession: false,
-            autoRefreshToken: false,
-            detectSessionInUrl: false
+              autoRefreshToken:
+                false,
+
+              detectSessionInUrl:
+                false
+            }
           }
-        }
-      );
-
-
-      // =====================================================
-      // LOGIN
-      // =====================================================
+        );
 
       const {
         data,
         error
       } =
-        await authClient.auth.signInWithPassword({
-          email: cleanEmail,
-          password
-        });
+        await authClient.auth
+          .signInWithPassword({
+            email:
+              cleanEmail,
 
+            password
+          });
 
       if (
         error ||
         !data?.user ||
         !data?.session
       ) {
-
         console.error(
           "LOGIN AUTH ERROR:",
           error
@@ -1322,18 +1993,13 @@ app.post(
 
         return res.status(401).json({
           success: false,
-          message: "Invalid email or password"
+          message:
+            "Invalid email or password"
         });
       }
 
-
       const user =
         data.user;
-
-
-      // =====================================================
-      // LOAD PROFILE
-      // =====================================================
 
       const {
         data: profile,
@@ -1344,12 +2010,13 @@ app.post(
           .select(
             "id, first_name, surname, phone, is_admin"
           )
-          .eq("id", user.id)
+          .eq(
+            "id",
+            user.id
+          )
           .maybeSingle();
 
-
       if (profileError) {
-
         console.error(
           "LOGIN PROFILE ERROR:",
           profileError
@@ -1357,37 +2024,27 @@ app.post(
 
         return res.status(500).json({
           success: false,
-          message: "Unable to verify account",
-          error: profileError.message
+          message:
+            "Unable to verify account",
+          error:
+            profileError.message
         });
       }
-
 
       if (!profile) {
-
         return res.status(403).json({
           success: false,
-          message: "User profile not found"
+          message:
+            "User profile not found"
         });
       }
-
-
-      // =====================================================
-      // ADMIN CHECK
-      // =====================================================
 
       const isAdmin =
         isAdminValue(
           profile.is_admin
         );
 
-
-      // =====================================================
-      // RESPONSE
-      // =====================================================
-
       return res.json({
-
         success: true,
 
         message:
@@ -1397,19 +2054,24 @@ app.post(
           data.session,
 
         access_token:
-          data.session.access_token,
+          data.session
+            .access_token,
 
         refresh_token:
-          data.session.refresh_token,
+          data.session
+            .refresh_token,
 
         token:
-          data.session.access_token,
+          data.session
+            .access_token,
 
         expires_at:
-          data.session.expires_at,
+          data.session
+            .expires_at,
 
         expires_in:
-          data.session.expires_in,
+          data.session
+            .expires_in,
 
         user,
 
@@ -1417,11 +2079,8 @@ app.post(
 
         is_admin:
           isAdmin
-
       });
-
     } catch (error) {
-
       console.error(
         "LOGIN ERROR:",
         error
@@ -1429,8 +2088,10 @@ app.post(
 
       return res.status(500).json({
         success: false,
-        message: "Unable to login",
-        error: error.message
+        message:
+          "Unable to login",
+        error:
+          error.message
       });
     }
   }
@@ -1447,10 +2108,6 @@ app.get(
     try {
       const userId =
         req.user.id;
-
-      /* ---------------------------------------------
-         PROFILE
-      --------------------------------------------- */
 
       const {
         data: profile,
@@ -1488,10 +2145,6 @@ app.get(
         });
       }
 
-      /* ---------------------------------------------
-         ADDRESS
-      --------------------------------------------- */
-
       let address =
         null;
 
@@ -1512,11 +2165,6 @@ app.get(
           address =
             result.data?.[0] ||
             null;
-        } else {
-          console.error(
-            "ME ADDRESS ERROR:",
-            result.error
-          );
         }
       } catch (error) {
         console.error(
@@ -1524,14 +2172,6 @@ app.get(
           error
         );
       }
-
-      /* ---------------------------------------------
-         ACCOUNTS
-         
-         Loaded separately from balances so that
-         a missing Supabase relationship does not
-         break the user dashboard.
-      --------------------------------------------- */
 
       const {
         data: accounts,
@@ -1546,11 +2186,6 @@ app.get(
           );
 
       if (accountsError) {
-        console.error(
-          "ME ACCOUNTS ERROR:",
-          accountsError
-        );
-
         return res.status(500).json({
           success: false,
           message:
@@ -1562,10 +2197,6 @@ app.get(
 
       const accountList =
         accounts || [];
-
-      /* ---------------------------------------------
-         BALANCES
-      --------------------------------------------- */
 
       const accountIds =
         accountList
@@ -1579,7 +2210,8 @@ app.get(
         [];
 
       if (
-        accountIds.length > 0
+        accountIds.length >
+        0
       ) {
         const {
           data,
@@ -1596,11 +2228,6 @@ app.get(
             );
 
         if (error) {
-          console.error(
-            "ME BALANCES ERROR:",
-            error
-          );
-
           return res.status(500).json({
             success: false,
             message:
@@ -1626,10 +2253,6 @@ app.get(
         }
       );
 
-      /*
-        Attach balances to accounts in the same
-        format your existing frontend expects.
-      */
       const accountListWithBalances =
         accountList.map(
           account => ({
@@ -1690,10 +2313,6 @@ app.get(
             0
         );
 
-      /* ---------------------------------------------
-         CARDS
-      --------------------------------------------- */
-
       let cards =
         [];
 
@@ -1717,11 +2336,6 @@ app.get(
         if (!result.error) {
           cards =
             result.data || [];
-        } else {
-          console.error(
-            "ME CARDS ERROR:",
-            result.error
-          );
         }
       } catch (error) {
         console.error(
@@ -2189,7 +2803,9 @@ app.post(
               req.user.id,
 
             name:
-              String(name).trim(),
+              String(
+                name
+              ).trim(),
 
             bank_name:
               String(
@@ -2804,7 +3420,9 @@ app.get(
         error
       } =
         await supabase
-          .from("notifications")
+          .from(
+            "notifications"
+          )
           .select("*")
           .eq(
             "user_id",
@@ -2897,377 +3515,6 @@ app.patch(
 );
 
 /* =====================================================
-   SUPPORT - CUSTOMER
-===================================================== */
-
-app.post(
-  "/api/support/conversations",
-  authenticate,
-  async (req, res) => {
-    try {
-      const {
-        subject,
-        message
-      } = req.body || {};
-
-      if (
-        !subject ||
-        !message
-      ) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Subject and message are required"
-        });
-      }
-
-      const {
-        data: conversation,
-        error:
-          conversationError
-      } =
-        await supabase
-          .from(
-            "support_conversations"
-          )
-          .insert({
-            user_id:
-              req.user.id,
-
-            subject:
-              String(
-                subject
-              ).trim(),
-
-            status:
-              "open"
-          })
-          .select()
-          .single();
-
-      if (conversationError) {
-        return res.status(400).json({
-          success: false,
-          message:
-            conversationError.message
-        });
-      }
-
-      const {
-        data: supportMessage,
-        error: messageError
-      } =
-        await supabase
-          .from(
-            "support_messages"
-          )
-          .insert({
-            conversation_id:
-              conversation.id,
-
-            sender_type:
-              "customer",
-
-            sender_id:
-              req.user.id,
-
-            message:
-              String(
-                message
-              ).trim()
-          })
-          .select()
-          .single();
-
-      if (messageError) {
-        return res.status(400).json({
-          success: false,
-          message:
-            messageError.message
-        });
-      }
-
-      return res.status(201).json({
-        success: true,
-        conversation,
-        message:
-          supportMessage
-      });
-    } catch (error) {
-      console.error(error);
-
-      return res.status(500).json({
-        success: false,
-        message:
-          "Unable to create support conversation"
-      });
-    }
-  }
-);
-
-app.get(
-  "/api/support/conversations",
-  authenticate,
-  async (req, res) => {
-    try {
-      const {
-        data,
-        error
-      } =
-        await supabase
-          .from(
-            "support_conversations"
-          )
-          .select("*")
-          .eq(
-            "user_id",
-            req.user.id
-          )
-          .order(
-            "updated_at",
-            {
-              ascending:
-                false
-            }
-          );
-
-      if (error) {
-        return res.status(500).json({
-          success: false,
-          message:
-            error.message
-        });
-      }
-
-      return res.json({
-        success: true,
-        conversations:
-          data || []
-      });
-    } catch (error) {
-      console.error(error);
-
-      return res.status(500).json({
-        success: false,
-        message:
-          "Unable to load support conversations"
-      });
-    }
-  }
-);
-
-app.get(
-  "/api/support/conversations/:id/messages",
-  authenticate,
-  async (req, res) => {
-    try {
-      const {
-        data: conversation,
-        error:
-          conversationError
-      } =
-        await supabase
-          .from(
-            "support_conversations"
-          )
-          .select("id")
-          .eq(
-            "id",
-            req.params.id
-          )
-          .eq(
-            "user_id",
-            req.user.id
-          )
-          .maybeSingle();
-
-      if (conversationError) {
-        return res.status(500).json({
-          success: false,
-          message:
-            conversationError.message
-        });
-      }
-
-      if (!conversation) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Conversation not found"
-        });
-      }
-
-      const {
-        data,
-        error
-      } =
-        await supabase
-          .from(
-            "support_messages"
-          )
-          .select("*")
-          .eq(
-            "conversation_id",
-            req.params.id
-          )
-          .order(
-            "created_at",
-            {
-              ascending:
-                true
-            }
-          );
-
-      if (error) {
-        return res.status(500).json({
-          success: false,
-          message:
-            error.message
-        });
-      }
-
-      return res.json({
-        success: true,
-        messages:
-          data || []
-      });
-    } catch (error) {
-      console.error(error);
-
-      return res.status(500).json({
-        success: false,
-        message:
-          "Unable to load messages"
-      });
-    }
-  }
-);
-
-app.post(
-  "/api/support/conversations/:id/messages",
-  authenticate,
-  async (req, res) => {
-    try {
-      const {
-        message
-      } = req.body || {};
-
-      if (!message) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Message is required"
-        });
-      }
-
-      const {
-        data: conversation,
-        error:
-          conversationError
-      } =
-        await supabase
-          .from(
-            "support_conversations"
-          )
-          .select("id")
-          .eq(
-            "id",
-            req.params.id
-          )
-          .eq(
-            "user_id",
-            req.user.id
-          )
-          .maybeSingle();
-
-      if (conversationError) {
-        return res.status(500).json({
-          success: false,
-          message:
-            conversationError.message
-        });
-      }
-
-      if (!conversation) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Conversation not found"
-        });
-      }
-
-      const {
-        data,
-        error
-      } =
-        await supabase
-          .from(
-            "support_messages"
-          )
-          .insert({
-            conversation_id:
-              req.params.id,
-
-            sender_type:
-              "customer",
-
-            sender_id:
-              req.user.id,
-
-            message:
-              String(
-                message
-              ).trim()
-          })
-          .select()
-          .single();
-
-      if (error) {
-        return res.status(400).json({
-          success: false,
-          message:
-            error.message
-        });
-      }
-
-      await supabase
-        .from(
-          "support_conversations"
-        )
-        .update({
-          updated_at:
-            new Date().toISOString(),
-
-          status:
-            "open"
-        })
-        .eq(
-          "id",
-          req.params.id
-        )
-        .eq(
-          "user_id",
-          req.user.id
-        );
-
-      return res.status(201).json({
-        success: true,
-        message:
-          data
-      });
-    } catch (error) {
-      console.error(error);
-
-      return res.status(500).json({
-        success: false,
-        message:
-          "Unable to send message"
-      });
-    }
-  }
-);
-
-/* =====================================================
    ADMIN STATS
 ===================================================== */
 
@@ -3285,6 +3532,7 @@ app.get(
           .select("*", {
             count:
               "exact",
+
             head:
               true
           })
@@ -3307,6 +3555,7 @@ app.get(
           .select("*", {
             count:
               "exact",
+
             head:
               true
           });
@@ -3328,6 +3577,7 @@ app.get(
           .select("*", {
             count:
               "exact",
+
             head:
               true
           })
@@ -3353,6 +3603,7 @@ app.get(
           .select("*", {
             count:
               "exact",
+
             head:
               true
           })
@@ -3399,342 +3650,6 @@ app.get(
           "Unable to load admin statistics",
         error:
           error.message
-      });
-    }
-  }
-);
-
-/* =====================================================
-   ADMIN USERS
-===================================================== */
-
-app.get(
-  "/api/admin/users",
-  authenticateAdmin,
-  async (req, res) => {
-    try {
-      console.log(
-        "ADMIN USERS REQUEST:",
-        req.user.email
-      );
-
-      /* ---------------------------------------------
-         PROFILES
-      --------------------------------------------- */
-
-      const {
-        data: profiles,
-        error: profilesError
-      } = await supabase
-        .from("profiles")
-        .select("*");
-
-      console.log(
-        "SUPABASE URL:",
-        process.env.SUPABASE_URL
-      );
-
-      console.log(
-        "SERVICE ROLE KEY LOADED:",
-        !!process.env.SUPABASE_SERVICE_ROLE_KEY
-      );
-
-      if (profilesError) {
-        console.error(
-          "ADMIN USERS PROFILE ERROR:",
-          profilesError
-        );
-
-        return res.status(500).json({
-          success: false,
-          message: "Unable to load user profiles",
-          error: profilesError.message
-        });
-      }
-
-      console.log(
-        "PROFILES COUNT:",
-        profiles?.length
-      );
-
-      console.log(
-        "PROFILE ADMIN VALUES:",
-        (profiles || []).map(profile => ({
-          id: profile.id,
-          email: profile.email,
-          is_admin: profile.is_admin
-        }))
-      );
-
-      /* ---------------------------------------------
-         ACCOUNTS
-      --------------------------------------------- */
-
-      const {
-        data: accounts,
-        error: accountsError
-      } = await supabase
-        .from("accounts")
-        .select("*");
-
-      if (accountsError) {
-        console.error(
-          "ADMIN USERS ACCOUNTS ERROR:",
-          accountsError
-        );
-
-        return res.status(500).json({
-          success: false,
-          message: "Unable to load accounts",
-          error: accountsError.message
-        });
-      }
-
-      /* ---------------------------------------------
-         BALANCES
-      --------------------------------------------- */
-
-      const {
-        data: balances,
-        error: balancesError
-      } = await supabase
-        .from("account_balances")
-        .select("*");
-
-      if (balancesError) {
-        console.error(
-          "ADMIN USERS BALANCE ERROR:",
-          balancesError
-        );
-
-        return res.status(500).json({
-          success: false,
-          message: "Unable to load account balances",
-          error: balancesError.message
-        });
-      }
-
-      /* ---------------------------------------------
-         AUTH USERS
-      --------------------------------------------- */
-
-      let authUsers = [];
-
-      try {
-        for (
-          let page = 1;
-          page <= 20;
-          page++
-        ) {
-          const {
-            data: authData,
-            error: authError
-          } =
-            await supabase.auth.admin.listUsers({
-              page,
-              perPage: 1000
-            });
-
-          if (authError) {
-            console.error(
-              "ADMIN AUTH USERS ERROR:",
-              authError
-            );
-            break;
-          }
-
-          const pageUsers =
-            authData?.users || [];
-
-          authUsers =
-            authUsers.concat(pageUsers);
-
-          if (
-            pageUsers.length < 1000
-          ) {
-            break;
-          }
-        }
-      } catch (error) {
-        console.error(
-          "ADMIN AUTH USERS EXCEPTION:",
-          error
-        );
-      }
-
-      const authMap = new Map();
-
-      authUsers.forEach(user => {
-        authMap.set(
-          user.id,
-          user
-        );
-      });
-
-      /* ---------------------------------------------
-         ACCOUNTS BY USER
-      --------------------------------------------- */
-
-      const accountsByUser = new Map();
-
-      (accounts || []).forEach(account => {
-        if (!account.user_id) {
-          return;
-        }
-
-        if (
-          !accountsByUser.has(
-            account.user_id
-          )
-        ) {
-          accountsByUser.set(
-            account.user_id,
-            []
-          );
-        }
-
-        accountsByUser
-          .get(account.user_id)
-          .push(account);
-      });
-
-      /* ---------------------------------------------
-         BALANCE MAP
-      --------------------------------------------- */
-
-      const balanceMap = new Map();
-
-      (balances || []).forEach(balance => {
-        if (balance.account_id) {
-          balanceMap.set(
-            balance.account_id,
-            balance
-          );
-        }
-      });
-
-      /* ---------------------------------------------
-         BUILD USERS
-      --------------------------------------------- */
-
-      const users =
-  (profiles || [])
-    .filter(profile => {
-
-      console.log(
-        "CHECKING PROFILE:",
-        profile.id,
-        profile.first_name,
-        profile.surname,
-        profile.email,
-        "is_admin:",
-        profile.is_admin,
-        "TYPE:",
-        typeof profile.is_admin
-      );
-
-      return profile.is_admin !== true;
-    })
-    .map(profile => {
-
-            const authUser =
-              authMap.get(
-                profile.id
-              );
-
-            const userAccounts =
-              accountsByUser.get(
-                profile.id
-              ) || [];
-
-            const account =
-              userAccounts.find(
-                item =>
-                  String(
-                    item.account_type || ""
-                  ).toLowerCase() ===
-                  "checking"
-              ) ||
-              userAccounts[0] ||
-              null;
-
-            const accountBalance =
-              account
-                ? balanceMap.get(
-                    account.id
-                  )
-                : null;
-
-            const firstName =
-              profile.first_name || "";
-
-            const surname =
-              profile.surname || "";
-
-            const fullName =
-              `${firstName} ${surname}`
-                .trim() ||
-              "Unnamed User";
-
-            const balance =
-              Number(
-                accountBalance
-                  ?.available_balance ??
-                accountBalance
-                  ?.balance ??
-                0
-              );
-
-            return {
-              id: profile.id,
-
-              full_name: fullName,
-
-              first_name: firstName,
-
-              surname: surname,
-
-              email:
-                authUser?.email ||
-                profile.email ||
-                "No email",
-
-              phone:
-                profile.phone || "",
-
-              balance,
-
-              account,
-
-              account_balance:
-                accountBalance,
-
-              accounts:
-                userAccounts
-            };
-          });
-
-      console.log(
-        "ADMIN USERS RETURNED:",
-        users.length
-      );
-
-      return res.json({
-        success: true,
-        users
-      });
-
-    } catch (error) {
-
-      console.error(
-        "ADMIN USERS ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        message: "Unable to load users",
-        error: error.message
       });
     }
   }
@@ -3838,10 +3753,6 @@ app.get(
         );
       }
 
-      /* ---------------------------------------------
-         ACCOUNTS
-      --------------------------------------------- */
-
       const {
         data: accounts,
         error:
@@ -3936,10 +3847,6 @@ app.get(
           })
         );
 
-      /* ---------------------------------------------
-         CARDS
-      --------------------------------------------- */
-
       let cards =
         [];
 
@@ -3956,11 +3863,6 @@ app.get(
         if (!result.error) {
           cards =
             result.data || [];
-        } else {
-          console.error(
-            "ADMIN CARDS ERROR:",
-            result.error
-          );
         }
       } catch (error) {
         console.error(
@@ -4240,7 +4142,7 @@ app.put(
       }
 
       /* ---------------------------------------------
-         CHECKING BALANCE
+         CHECKING
       --------------------------------------------- */
 
       const {
@@ -4494,143 +4396,148 @@ app.put(
         }
       }
 
-    /* CARD BALANCE */
+      /* ---------------------------------------------
+         CARD BALANCE
+      --------------------------------------------- */
 
-  try {
+      const {
+        data: existingCard,
+        error:
+          cardLookupError
+      } =
+        await supabase
+          .from("cards")
+          .select("*")
+          .eq(
+            "user_id",
+            userId
+          )
+          .order(
+            "created_at",
+            {
+              ascending:
+                false
+            }
+          )
+          .limit(1)
+          .maybeSingle();
 
-    const {
-      data: existingCard,
-      error: cardLookupError
-    } =
-      await supabase
-        .from("cards")
-        .select("*")
-        .eq("user_id", userId)
-        .order("created_at", {
-          ascending: false
-        })
-        .limit(1)
-        .maybeSingle();
+      if (cardLookupError) {
+        console.error(
+          "CARD LOOKUP ERROR:",
+          cardLookupError
+        );
 
-    if (cardLookupError) {
+        return res.status(500).json({
+          success: false,
+          message:
+            cardLookupError.message
+        });
+      }
 
+      if (existingCard) {
+        const {
+          error:
+            cardUpdateError
+        } =
+          await supabase
+            .from("cards")
+            .update({
+              balance:
+                card,
+
+              updated_at:
+                new Date().toISOString()
+            })
+            .eq(
+              "id",
+              existingCard.id
+            );
+
+        if (cardUpdateError) {
+          console.error(
+            "CARD UPDATE ERROR:",
+            cardUpdateError
+          );
+
+          return res.status(500).json({
+            success: false,
+            message:
+              cardUpdateError.message
+          });
+        }
+      } else {
+        const {
+          error:
+            cardCreateError
+        } =
+          await supabase
+            .from("cards")
+            .insert({
+              user_id:
+                userId,
+
+              account_id:
+                checkingAccount.id,
+
+              balance:
+                card,
+
+              card_type:
+                "debit",
+
+              brand:
+                "Visa",
+
+              last_four:
+                "0000",
+
+              status:
+                "active"
+            });
+
+        if (cardCreateError) {
+          console.error(
+            "CARD CREATE ERROR:",
+            cardCreateError
+          );
+
+          return res.status(500).json({
+            success: false,
+            message:
+              cardCreateError.message
+          });
+        }
+      }
+
+      return res.json({
+        success: true,
+
+        message:
+          "User balances updated successfully",
+
+        balances: {
+          checking,
+
+          savings,
+
+          card
+        }
+      });
+    } catch (error) {
       console.error(
-        "CARD LOOKUP ERROR:",
-        cardLookupError
+        "ADMIN BALANCE UPDATE ERROR:",
+        error
       );
 
       return res.status(500).json({
         success: false,
-        message: cardLookupError.message
+        message:
+          "Unable to update user balances",
+        error:
+          error.message
       });
-
     }
-
-    if (existingCard) {
-
-      const {
-        error: cardUpdateError
-      } =
-        await supabase
-          .from("cards")
-          .update({
-            balance: card
-          })
-          .eq(
-            "id",
-            existingCard.id
-          );
-
-      if (cardUpdateError) {
-
-        console.error(
-          "CARD UPDATE ERROR:",
-          cardUpdateError
-        );
-
-        return res.status(500).json({
-          success: false,
-          message: cardUpdateError.message
-        });
-
-      }
-
-    } else {
-
-      const {
-        error: cardCreateError
-      } =
-        await supabase
-          .from("cards")
-          .insert({
-  user_id: userId,
-  account_id: checkingAccount.id,
-  balance: card,
-  card_type: "debit",
-  brand: "Visa",
-  last_four: "0000",
-  status: "active"
-});
-
-      if (cardCreateError) {
-
-        console.error(
-          "CARD CREATE ERROR:",
-          cardCreateError
-        );
-
-        return res.status(500).json({
-          success: false,
-          message: cardCreateError.message
-        });
-
-      }
-
-    }
-
-  } catch (error) {
-
-    console.error(
-      "CARD BALANCE ERROR:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message: "Unable to update card balance",
-      error: error.message
-    });
-
-  }
-
-
-  return res.json({
-    success: true,
-    message: "User balances updated successfully",
-    balances: {
-      checking,
-      savings,
-      card
-    }
-  });
-
-
-} catch (error) {
-
-  console.error(
-    "ADMIN BALANCE UPDATE ERROR:",
-    error
-  );
-
-  return res.status(500).json({
-    success: false,
-    message: "Unable to update user balances",
-    error: error.message
-  });
-
-}
-
-
   }
 );
 
@@ -4815,45 +4722,6 @@ app.patch(
         );
       }
 
-      try {
-        const {
-          error:
-            auditError
-        } =
-          await supabase
-            .from(
-              "audit_logs"
-            )
-            .insert({
-              admin_id:
-                req.user.id,
-
-              action:
-                "approve_withdrawal",
-
-              target_type:
-                "withdrawal",
-
-              target_id:
-                withdrawal.id,
-
-              description:
-                `Approved withdrawal ${withdrawal.id}`
-            });
-
-        if (auditError) {
-          console.error(
-            "AUDIT LOG ERROR:",
-            auditError
-          );
-        }
-      } catch (error) {
-        console.error(
-          "AUDIT LOG EXCEPTION:",
-          error
-        );
-      }
-
       return res.json({
         success: true,
 
@@ -5005,45 +4873,6 @@ app.patch(
         );
       }
 
-      try {
-        const {
-          error:
-            auditError
-        } =
-          await supabase
-            .from(
-              "audit_logs"
-            )
-            .insert({
-              admin_id:
-                req.user.id,
-
-              action:
-                "reject_withdrawal",
-
-              target_type:
-                "withdrawal",
-
-              target_id:
-                withdrawal.id,
-
-              description:
-                `Rejected withdrawal ${withdrawal.id}`
-            });
-
-        if (auditError) {
-          console.error(
-            "AUDIT LOG ERROR:",
-            auditError
-          );
-        }
-      } catch (error) {
-        console.error(
-          "AUDIT LOG EXCEPTION:",
-          error
-        );
-      }
-
       return res.json({
         success: true,
 
@@ -5060,318 +4889,6 @@ app.patch(
         success: false,
         message:
           "Unable to reject withdrawal"
-      });
-    }
-  }
-);
-
-/* =====================================================
-   ADMIN SUPPORT
-===================================================== */
-
-app.get(
-  "/api/admin/support/conversations",
-  authenticateAdmin,
-  async (req, res) => {
-    try {
-      const {
-        data,
-        error
-      } =
-        await supabase
-          .from(
-            "support_conversations"
-          )
-          .select("*")
-          .order(
-            "updated_at",
-            {
-              ascending:
-                false
-            }
-          );
-
-      if (error) {
-        return res.status(500).json({
-          success: false,
-          message:
-            error.message
-        });
-      }
-
-      return res.json({
-        success: true,
-        conversations:
-          data || []
-      });
-    } catch (error) {
-      console.error(error);
-
-      return res.status(500).json({
-        success: false,
-        message:
-          "Unable to load support conversations"
-      });
-    }
-  }
-);
-
-app.get(
-  "/api/admin/support/conversations/:id/messages",
-  authenticateAdmin,
-  async (req, res) => {
-    try {
-      const {
-        data,
-        error
-      } =
-        await supabase
-          .from(
-            "support_messages"
-          )
-          .select("*")
-          .eq(
-            "conversation_id",
-            req.params.id
-          )
-          .order(
-            "created_at",
-            {
-              ascending:
-                true
-            }
-          );
-
-      if (error) {
-        return res.status(500).json({
-          success: false,
-          message:
-            error.message
-        });
-      }
-
-      return res.json({
-        success: true,
-        messages:
-          data || []
-      });
-    } catch (error) {
-      console.error(error);
-
-      return res.status(500).json({
-        success: false,
-        message:
-          "Unable to load messages"
-      });
-    }
-  }
-);
-
-app.post(
-  "/api/admin/support/conversations/:id/messages",
-  authenticateAdmin,
-  async (req, res) => {
-    try {
-      const {
-        message
-      } = req.body || {};
-
-      if (!message) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Message is required"
-        });
-      }
-
-      const {
-        data: conversation,
-        error:
-          conversationError
-      } =
-        await supabase
-          .from(
-            "support_conversations"
-          )
-          .select("*")
-          .eq(
-            "id",
-            req.params.id
-          )
-          .maybeSingle();
-
-      if (conversationError) {
-        return res.status(500).json({
-          success: false,
-          message:
-            conversationError.message
-        });
-      }
-
-      if (!conversation) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Conversation not found"
-        });
-      }
-
-      const {
-        data,
-        error
-      } =
-        await supabase
-          .from(
-            "support_messages"
-          )
-          .insert({
-            conversation_id:
-              req.params.id,
-
-            sender_type:
-              "admin",
-
-            sender_id:
-              req.user.id,
-
-            message:
-              String(
-                message
-              ).trim()
-          })
-          .select()
-          .single();
-
-      if (error) {
-        return res.status(400).json({
-          success: false,
-          message:
-            error.message
-        });
-      }
-
-      await supabase
-        .from(
-          "support_conversations"
-        )
-        .update({
-          updated_at:
-            new Date().toISOString(),
-
-          status:
-            "open"
-        })
-        .eq(
-          "id",
-          req.params.id
-        );
-
-      try {
-        const {
-          error:
-            notificationError
-        } =
-          await supabase
-            .from(
-              "notifications"
-            )
-            .insert({
-              user_id:
-                conversation.user_id,
-
-              title:
-                "New Support Message",
-
-              message:
-                "You have received a new message from Sterling One Bank Support.",
-
-              type:
-                "system"
-            });
-
-        if (
-          notificationError
-        ) {
-          console.error(
-            "SUPPORT NOTIFICATION ERROR:",
-            notificationError
-          );
-        }
-      } catch (error) {
-        console.error(
-          "SUPPORT NOTIFICATION EXCEPTION:",
-          error
-        );
-      }
-
-      return res.status(201).json({
-        success: true,
-        message:
-          data
-      });
-    } catch (error) {
-      console.error(error);
-
-      return res.status(500).json({
-        success: false,
-        message:
-          "Unable to send support message"
-      });
-    }
-  }
-);
-
-app.patch(
-  "/api/admin/support/conversations/:id/close",
-  authenticateAdmin,
-  async (req, res) => {
-    try {
-      const {
-        data,
-        error
-      } =
-        await supabase
-          .from(
-            "support_conversations"
-          )
-          .update({
-            status:
-              "closed",
-
-            updated_at:
-              new Date().toISOString()
-          })
-          .eq(
-            "id",
-            req.params.id
-          )
-          .select()
-          .single();
-
-      if (error) {
-        return res.status(400).json({
-          success: false,
-          message:
-            error.message
-        });
-      }
-
-      return res.json({
-        success: true,
-
-        message:
-          "Conversation closed",
-
-        conversation:
-          data
-      });
-    } catch (error) {
-      console.error(error);
-
-      return res.status(500).json({
-        success: false,
-        message:
-          "Unable to close conversation"
       });
     }
   }
