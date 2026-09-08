@@ -3069,15 +3069,15 @@ app.post(
             "user_id",
             req.user.id
           )
-          .eq(
-            "account_type",
-            "checking"
-          )
-          .eq(
-            "status",
-            "active"
-          )
-          .limit(1)
+         .eq(
+  "account_type",
+  "checking"
+)
+.in(
+  "status",
+  ["active", "suspended"]
+)
+.limit(1)
           .maybeSingle();
       if (accountError) {
         console.error(
