@@ -13,7 +13,7 @@ const CODE_EXPIRY =
   10 * 60 * 1000;
 // Email sending disabled until
 // your sending domain is ready.
-const SEND_TRANSFER_OTP_EMAIL = false;
+const SEND_TRANSFER_OTP_EMAIL = true;
 
 /* =====================================================
    CONFIG
