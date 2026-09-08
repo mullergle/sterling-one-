@@ -3297,53 +3297,66 @@ app.post(
               "Customer email not found"
             );
           }
-          await resend.emails.send({
-            from:
-              "Sterling One Bank <onboarding@resend.dev>",
-            to:
-              customerEmail,
-            subject:
-              "Sterling One Bank Transfer Verification",
-            html: `
-              <div style="
-                font-family:Arial,sans-serif;
-                line-height:1.6;
-              ">
-                <h2>
-                  Sterling One Bank
-                </h2>
-                <p>
-                  Your transfer verification
-                  code is:
-                </p>
-                <div style="
-                  font-size:32px;
-                  font-weight:bold;
-                  letter-spacing:8px;
-                  margin:20px 0;
-                ">
-                  ${verificationCode}
-                </div>
-                <p>
-                  This code expires in
-                  10 minutes.
-                </p>
-                <p>
-                  If you did not request
-                  this transfer, please
-                  contact Sterling One Bank
-                  Support immediately.
-                </p>
-              </div>
-            `
-          });
-        } catch (emailError) {
-          console.error(
-            "TRANSFER OTP EMAIL ERROR:",
-            emailError
-          );
-        }
-      }
+          const { data: emailData, error: emailError } =
+  await resend.emails.send({
+    from:
+      "Sterling One Bank <onboarding@resend.dev>",
+    to:
+      customerEmail,
+    subject:
+      "Sterling One Bank Transfer Verification",
+    html: `
+      <div style="
+        font-family:Arial,sans-serif;
+        line-height:1.6;
+      ">
+        <h2>
+          Sterling One Bank
+        </h2>
+
+        <p>
+          Your transfer verification
+          code is:
+        </p>
+
+        <div style="
+          font-size:32px;
+          font-weight:bold;
+          letter-spacing:8px;
+          margin:20px 0;
+        ">
+          ${verificationCode}
+        </div>
+
+        <p>
+          This code expires in
+          10 minutes.
+        </p>
+
+        <p>
+          If you did not request
+          this transfer, please
+          contact Sterling One Bank
+          Support immediately.
+        </p>
+      </div>
+    `
+  });
+
+console.log(
+  "RESEND EMAIL RESPONSE:",
+  {
+    data: emailData,
+    error: emailError
+  }
+);
+
+if (emailError) {
+  throw new Error(
+    emailError.message ||
+    "Resend failed to send email"
+  );
+}
       /* =================================================
          RESPONSE
       ================================================= */
