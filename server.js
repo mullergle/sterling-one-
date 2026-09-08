@@ -3660,6 +3660,57 @@ app.post(
             remainingAttempts
         });
       }
+      
+      /* =================================================
+   CHECK ACCOUNT SUSPENSION
+================================================= */
+const {
+  data: senderAccount,
+  error: senderAccountError
+} = await supabase
+  .from("accounts")
+  .select("id, status")
+  .eq("user_id", req.user.id)
+  .eq("account_type", "checking")
+  .in("status", ["active", "suspended"])
+  .limit(1)
+  .maybeSingle();
+
+if (senderAccountError) {
+  console.error(
+    "SENDER ACCOUNT STATUS ERROR:",
+    senderAccountError
+  );
+
+  return res.status(500).json({
+    success: false,
+    message:
+      "Unable to verify account status"
+  });
+}
+
+if (!senderAccount) {
+  return res.status(404).json({
+    success: false,
+    message:
+      "Checking account not found"
+  });
+}
+
+if (
+  senderAccount.status ===
+  "suspended"
+) {
+  return res.status(403).json({
+    success: false,
+    code:
+      "ACCOUNT_SUSPENDED",
+    message:
+      "Transfer failed. Please contact Support."
+  });
+}
+      
+      
       /* =================================================
          MARK CODE AS VERIFIED
       ================================================= */
