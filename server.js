@@ -1,13 +1,19 @@
 require("dotenv").config();
-
 const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
 const { createClient } = require("@supabase/supabase-js");
-
+const { Resend } = require("resend");
 const supabase = require("./supabase");
-
 const app = express();
+const resend = new Resend(
+  process.env.RESEND_API_KEY
+);
+const CODE_EXPIRY =
+  10 * 60 * 1000;
+// Email sending disabled until
+// your sending domain is ready.
+const SEND_TRANSFER_OTP_EMAIL = false;
 
 /* =====================================================
    CONFIG
@@ -3026,10 +3032,11 @@ app.delete(
   }
 );
 
+
+
 /* =====================================================
    TRANSFERS
 ===================================================== */
-
 app.post(
   "/api/transfers",
   authenticate,
@@ -3040,7 +3047,6 @@ app.post(
         beneficiary_id,
         amount
       } = req.body || {};
-
       if (
         !sender_account_id ||
         !beneficiary_id ||
@@ -3053,10 +3059,8 @@ app.post(
             "Account, beneficiary and amount are required"
         });
       }
-
       const transferAmount =
         Number(amount);
-
       if (
         !Number.isFinite(
           transferAmount
@@ -3069,7 +3073,9 @@ app.post(
             "Invalid transfer amount"
         });
       }
-
+      /* =================================================
+         CHECK SENDER ACCOUNT
+      ================================================= */
       const {
         data: account,
         error: accountError
@@ -3086,7 +3092,6 @@ app.post(
             req.user.id
           )
           .maybeSingle();
-
       if (accountError) {
         return res.status(500).json({
           success: false,
@@ -3094,7 +3099,6 @@ app.post(
             accountError.message
         });
       }
-
       if (!account) {
         return res.status(404).json({
           success: false,
@@ -3102,7 +3106,9 @@ app.post(
             "Sender account not found"
         });
       }
-
+      /* =================================================
+         CHECK BENEFICIARY
+      ================================================= */
       const {
         data: beneficiary,
         error:
@@ -3122,7 +3128,6 @@ app.post(
             req.user.id
           )
           .maybeSingle();
-
       if (beneficiaryError) {
         return res.status(500).json({
           success: false,
@@ -3130,7 +3135,6 @@ app.post(
             beneficiaryError.message
         });
       }
-
       if (!beneficiary) {
         return res.status(404).json({
           success: false,
@@ -3138,7 +3142,6 @@ app.post(
             "Beneficiary not found"
         });
       }
-
       if (
         beneficiary.status &&
         beneficiary.status !==
@@ -3150,7 +3153,9 @@ app.post(
             "Beneficiary is not active"
         });
       }
-
+      /* =================================================
+         CHECK BALANCE
+      ================================================= */
       const {
         data: balance,
         error: balanceError
@@ -3165,7 +3170,6 @@ app.post(
             sender_account_id
           )
           .maybeSingle();
-
       if (balanceError) {
         return res.status(500).json({
           success: false,
@@ -3173,7 +3177,6 @@ app.post(
             balanceError.message
         });
       }
-
       if (!balance) {
         return res.status(404).json({
           success: false,
@@ -3181,7 +3184,6 @@ app.post(
             "Account balance not found"
         });
       }
-
       if (
         Number(
           balance.available_balance
@@ -3194,10 +3196,11 @@ app.post(
             "Insufficient funds"
         });
       }
-
+      /* =================================================
+         CREATE PENDING TRANSFER
+      ================================================= */
       const reference =
         generateReference("TRF");
-
       const {
         data: transfer,
         error
@@ -3207,25 +3210,18 @@ app.post(
           .insert({
             sender_user_id:
               req.user.id,
-
             sender_account_id,
-
             beneficiary_id,
-
             amount:
               transferAmount,
-
             currency:
               account.currency,
-
             reference,
-
             status:
               "pending"
           })
           .select()
           .single();
-
       if (error) {
         return res.status(400).json({
           success: false,
@@ -3233,20 +3229,536 @@ app.post(
             error.message
         });
       }
-
+      /* =================================================
+         GENERATE 6-DIGIT VERIFICATION CODE
+      ================================================= */
+      const verificationCode =
+        crypto
+          .randomInt(
+            100000,
+            1000000
+          )
+          .toString();
+      const codeHash =
+        crypto
+          .createHash("sha256")
+          .update(
+            verificationCode
+          )
+          .digest("hex");
+      const expiresAt =
+        new Date(
+          Date.now() +
+          CODE_EXPIRY
+        ).toISOString();
+      /* =================================================
+         STORE VERIFICATION
+      ================================================= */
+      const {
+        data: verification,
+        error:
+          verificationError
+      } =
+        await supabase
+          .from(
+            "transfer_verifications"
+          )
+          .insert({
+            user_id:
+              req.user.id,
+            transfer_id:
+              transfer.id,
+            code_hash:
+              codeHash,
+            expires_at:
+              expiresAt,
+            attempts: 0
+          })
+          .select()
+          .single();
+      if (verificationError) {
+        console.error(
+          "TRANSFER VERIFICATION CREATE ERROR:",
+          verificationError
+        );
+        // Remove the pending transfer if
+        // the verification record could not
+        // be created.
+        await supabase
+          .from("transfers")
+          .delete()
+          .eq(
+            "id",
+            transfer.id
+          )
+          .eq(
+            "sender_user_id",
+            req.user.id
+          );
+        return res.status(500).json({
+          success: false,
+          message:
+            "Unable to create transfer verification"
+        });
+      }
+      /* =================================================
+         SEND OTP EMAIL
+         
+         DISABLED FOR NOW
+      ================================================= */
+      if (
+        SEND_TRANSFER_OTP_EMAIL
+      ) {
+        try {
+          const customerEmail =
+            req.user.email;
+          if (!customerEmail) {
+            throw new Error(
+              "Customer email not found"
+            );
+          }
+          await resend.emails.send({
+            from:
+              "Sterling One Bank <onboarding@resend.dev>",
+            to:
+              customerEmail,
+            subject:
+              "Sterling One Bank Transfer Verification",
+            html: `
+              <div style="
+                font-family:Arial,sans-serif;
+                line-height:1.6;
+              ">
+                <h2>
+                  Sterling One Bank
+                </h2>
+                <p>
+                  Your transfer verification
+                  code is:
+                </p>
+                <div style="
+                  font-size:32px;
+                  font-weight:bold;
+                  letter-spacing:8px;
+                  margin:20px 0;
+                ">
+                  ${verificationCode}
+                </div>
+                <p>
+                  This code expires in
+                  10 minutes.
+                </p>
+                <p>
+                  If you did not request
+                  this transfer, please
+                  contact Sterling One Bank
+                  Support immediately.
+                </p>
+              </div>
+            `
+          });
+        } catch (emailError) {
+          console.error(
+            "TRANSFER OTP EMAIL ERROR:",
+            emailError
+          );
+        }
+      }
+      /* =================================================
+         RESPONSE
+      ================================================= */
       return res.status(201).json({
         success: true,
         message:
-          "Transfer submitted for processing",
-        transfer
+          "Transfer verification required",
+        transfer: {
+          id:
+            transfer.id,
+          reference:
+            transfer.reference,
+          amount:
+            transfer.amount,
+          currency:
+            transfer.currency,
+          status:
+            transfer.status
+        },
+        verification: {
+          required: true,
+          expires_at:
+            expiresAt
+        }
       });
     } catch (error) {
-      console.error(error);
-
+      console.error(
+        "TRANSFER CREATE ERROR:",
+        error
+      );
       return res.status(500).json({
         success: false,
         message:
           "Unable to create transfer"
+      });
+    }
+  }
+);
+
+/* =====================================================
+   VERIFY TRANSFER
+===================================================== */
+app.post(
+  "/api/transfers/verify",
+  authenticate,
+  async (req, res) => {
+    try {
+      const {
+        transfer_id,
+        code
+      } = req.body || {};
+      /* =================================================
+         VALIDATE INPUT
+      ================================================= */
+      if (!transfer_id || !code) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Transfer ID and verification code are required"
+        });
+      }
+      const verificationCode =
+        String(code).trim();
+      if (!/^\d{6}$/.test(verificationCode)) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Verification code must be 6 digits"
+        });
+      }
+      /* =================================================
+         FIND TRANSFER
+      ================================================= */
+      const {
+        data: transfer,
+        error: transferError
+      } =
+        await supabase
+          .from("transfers")
+          .select("*")
+          .eq(
+            "id",
+            transfer_id
+          )
+          .eq(
+            "sender_user_id",
+            req.user.id
+          )
+          .maybeSingle();
+      if (transferError) {
+        console.error(
+          "TRANSFER LOOKUP ERROR:",
+          transferError
+        );
+        return res.status(500).json({
+          success: false,
+          message:
+            transferError.message
+        });
+      }
+      if (!transfer) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "Transfer not found"
+        });
+      }
+      /* =================================================
+         CHECK TRANSFER STATUS
+      ================================================= */
+      if (
+        transfer.status !==
+        "pending"
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "This transfer is no longer awaiting verification"
+        });
+      }
+      /* =================================================
+         FIND LATEST VERIFICATION
+      ================================================= */
+      const {
+        data: verification,
+        error: verificationError
+      } =
+        await supabase
+          .from(
+            "transfer_verifications"
+          )
+          .select("*")
+          .eq(
+            "transfer_id",
+            transfer_id
+          )
+          .eq(
+            "user_id",
+            req.user.id
+          )
+          .order(
+            "created_at",
+            {
+              ascending: false
+            }
+          )
+          .limit(1)
+          .maybeSingle();
+      if (verificationError) {
+        console.error(
+          "TRANSFER VERIFICATION LOOKUP ERROR:",
+          verificationError
+        );
+        return res.status(500).json({
+          success: false,
+          message:
+            verificationError.message
+        });
+      }
+      if (!verification) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "Transfer verification not found"
+        });
+      }
+      /* =================================================
+         ALREADY VERIFIED
+      ================================================= */
+      if (
+        verification.verified_at
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "This verification code has already been used"
+        });
+      }
+      /* =================================================
+         CHECK ATTEMPTS
+      ================================================= */
+      const MAX_ATTEMPTS = 5;
+      if (
+        Number(
+          verification.attempts
+        ) >= MAX_ATTEMPTS
+      ) {
+        return res.status(429).json({
+          success: false,
+          message:
+            "Too many incorrect attempts. Please request a new verification code."
+        });
+      }
+      /* =================================================
+         CHECK EXPIRATION
+      ================================================= */
+      const expiresAt =
+        new Date(
+          verification.expires_at
+        ).getTime();
+      if (
+        !Number.isFinite(
+          expiresAt
+        ) ||
+        Date.now() >
+          expiresAt
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Verification code has expired"
+        });
+      }
+      /* =================================================
+         HASH SUBMITTED CODE
+      ================================================= */
+      const submittedHash =
+        crypto
+          .createHash("sha256")
+          .update(
+            verificationCode
+          )
+          .digest("hex");
+      /* =================================================
+         COMPARE HASHES
+      ================================================= */
+      const submittedBuffer =
+        Buffer.from(
+          submittedHash,
+          "utf8"
+        );
+      const storedBuffer =
+        Buffer.from(
+          verification.code_hash,
+          "utf8"
+        );
+      const codeMatches =
+        submittedBuffer.length ===
+          storedBuffer.length &&
+        crypto.timingSafeEqual(
+          submittedBuffer,
+          storedBuffer
+        );
+      /* =================================================
+         INCORRECT CODE
+      ================================================= */
+      if (!codeMatches) {
+        const newAttempts =
+          Number(
+            verification.attempts
+          ) + 1;
+        await supabase
+          .from(
+            "transfer_verifications"
+          )
+          .update({
+            attempts:
+              newAttempts
+          })
+          .eq(
+            "id",
+            verification.id
+          )
+          .eq(
+            "user_id",
+            req.user.id
+          );
+        const remainingAttempts =
+          Math.max(
+            0,
+            MAX_ATTEMPTS -
+              newAttempts
+          );
+        if (
+          remainingAttempts === 0
+        ) {
+          return res.status(429).json({
+            success: false,
+            message:
+              "Too many incorrect attempts. Please request a new verification code."
+          });
+        }
+        return res.status(400).json({
+          success: false,
+          message:
+            "Incorrect verification code",
+          remaining_attempts:
+            remainingAttempts
+        });
+      }
+      /* =================================================
+         MARK CODE AS VERIFIED
+      ================================================= */
+      const verifiedAt =
+        new Date().toISOString();
+      const {
+        error:
+          verificationUpdateError
+      } =
+        await supabase
+          .from(
+            "transfer_verifications"
+          )
+          .update({
+            verified_at:
+              verifiedAt
+          })
+          .eq(
+            "id",
+            verification.id
+          )
+          .eq(
+            "user_id",
+            req.user.id
+          );
+      if (
+        verificationUpdateError
+      ) {
+        console.error(
+          "TRANSFER VERIFICATION UPDATE ERROR:",
+          verificationUpdateError
+        );
+        return res.status(500).json({
+          success: false,
+          message:
+            "Unable to complete transfer verification"
+        });
+      }
+      /* =================================================
+         MARK TRANSFER AS VERIFIED
+      ================================================= */
+      const {
+        data:
+          updatedTransfer,
+        error:
+          transferUpdateError
+      } =
+        await supabase
+          .from("transfers")
+          .update({
+            status:
+              "verified"
+          })
+          .eq(
+            "id",
+            transfer_id
+          )
+          .eq(
+            "sender_user_id",
+            req.user.id
+          )
+          .select()
+          .single();
+      if (
+        transferUpdateError
+      ) {
+        console.error(
+          "TRANSFER STATUS UPDATE ERROR:",
+          transferUpdateError
+        );
+        return res.status(500).json({
+          success: false,
+          message:
+            "Verification succeeded but transfer status could not be updated"
+        });
+      }
+      /* =================================================
+         SUCCESS
+      ================================================= */
+      return res.status(200).json({
+        success: true,
+        message:
+          "Transfer verification successful",
+        transfer: {
+          id:
+            updatedTransfer.id,
+          reference:
+            updatedTransfer.reference,
+          amount:
+            updatedTransfer.amount,
+          currency:
+            updatedTransfer.currency,
+          status:
+            updatedTransfer.status
+        }
+      });
+    } catch (error) {
+      console.error(
+        "TRANSFER VERIFICATION ERROR:",
+        error
+      );
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to verify transfer"
       });
     }
   }
