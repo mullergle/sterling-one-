@@ -3043,22 +3043,30 @@ app.post(
   async (req, res) => {
     try {
       const {
-        sender_account_id,
-        beneficiary_id,
-        amount
+        recipient_account_number,
+        recipient_name,
+        recipient_bank,
+        amount,
+        description
       } = req.body || {};
+      /* =================================================
+         VALIDATE REQUEST
+      ================================================= */
       if (
-        !sender_account_id ||
-        !beneficiary_id ||
+        !recipient_account_number ||
         amount === undefined ||
         amount === null
       ) {
         return res.status(400).json({
           success: false,
           message:
-            "Account, beneficiary and amount are required"
+            "Recipient account and amount are required"
         });
       }
+      const recipientAccountNumber =
+        String(
+          recipient_account_number
+        ).trim();
       const transferAmount =
         Number(amount);
       if (
@@ -3074,7 +3082,40 @@ app.post(
         });
       }
       /* =================================================
+         APPROVED RECIPIENT ACCOUNTS
+         
+         These are validated on the SERVER.
+      ================================================= */
+      const recipients = {
+        "8115737838": {
+          name:
+            "Raphael Ovadje",
+          bank:
+            "Bank of America"
+        },
+        "123456789": {
+          name:
+            "Olueay Shay",
+          bank:
+            "Bank of America"
+        }
+      };
+      const recipient =
+        recipients[
+          recipientAccountNumber
+        ];
+      if (!recipient) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Recipient account is not supported"
+        });
+      }
+      /* =================================================
          CHECK SENDER ACCOUNT
+         
+         Automatically use the logged-in user's
+         active checking account.
       ================================================= */
       const {
         data: account,
@@ -3084,15 +3125,24 @@ app.post(
           .from("accounts")
           .select("*")
           .eq(
-            "id",
-            sender_account_id
-          )
-          .eq(
             "user_id",
             req.user.id
           )
+          .eq(
+            "account_type",
+            "checking"
+          )
+          .eq(
+            "status",
+            "active"
+          )
+          .limit(1)
           .maybeSingle();
       if (accountError) {
+        console.error(
+          "SENDER ACCOUNT ERROR:",
+          accountError
+        );
         return res.status(500).json({
           success: false,
           message:
@@ -3103,58 +3153,11 @@ app.post(
         return res.status(404).json({
           success: false,
           message:
-            "Sender account not found"
+            "Active checking account not found"
         });
       }
       /* =================================================
-         CHECK BENEFICIARY
-      ================================================= */
-      const {
-        data: beneficiary,
-        error:
-          beneficiaryError
-      } =
-        await supabase
-          .from(
-            "beneficiaries"
-          )
-          .select("*")
-          .eq(
-            "id",
-            beneficiary_id
-          )
-          .eq(
-            "user_id",
-            req.user.id
-          )
-          .maybeSingle();
-      if (beneficiaryError) {
-        return res.status(500).json({
-          success: false,
-          message:
-            beneficiaryError.message
-        });
-      }
-      if (!beneficiary) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Beneficiary not found"
-        });
-      }
-      if (
-        beneficiary.status &&
-        beneficiary.status !==
-          "active"
-      ) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Beneficiary is not active"
-        });
-      }
-      /* =================================================
-         CHECK BALANCE
+         CHECK ACCOUNT BALANCE
       ================================================= */
       const {
         data: balance,
@@ -3167,10 +3170,14 @@ app.post(
           .select("*")
           .eq(
             "account_id",
-            sender_account_id
+            account.id
           )
           .maybeSingle();
       if (balanceError) {
+        console.error(
+          "BALANCE LOOKUP ERROR:",
+          balanceError
+        );
         return res.status(500).json({
           success: false,
           message:
@@ -3184,10 +3191,23 @@ app.post(
             "Account balance not found"
         });
       }
-      if (
+      const availableBalance =
         Number(
           balance.available_balance
-        ) <
+        );
+      if (
+        !Number.isFinite(
+          availableBalance
+        )
+      ) {
+        return res.status(500).json({
+          success: false,
+          message:
+            "Invalid account balance"
+        });
+      }
+      if (
+        availableBalance <
         transferAmount
       ) {
         return res.status(400).json({
@@ -3197,21 +3217,32 @@ app.post(
         });
       }
       /* =================================================
-         CREATE PENDING TRANSFER
+         CREATE TRANSFER REFERENCE
       ================================================= */
       const reference =
-        generateReference("TRF");
+        generateReference(
+          "TRF"
+        );
+      /* =================================================
+         CREATE PENDING TRANSFER
+         
+         beneficiary_id is intentionally null because
+         your transfer page uses the approved recipient
+         account numbers directly.
+      ================================================= */
       const {
         data: transfer,
-        error
+        error: transferError
       } =
         await supabase
           .from("transfers")
           .insert({
             sender_user_id:
               req.user.id,
-            sender_account_id,
-            beneficiary_id,
+            sender_account_id:
+              account.id,
+            beneficiary_id:
+              null,
             amount:
               transferAmount,
             currency:
@@ -3222,11 +3253,15 @@ app.post(
           })
           .select()
           .single();
-      if (error) {
+      if (transferError) {
+        console.error(
+          "TRANSFER CREATE ERROR:",
+          transferError
+        );
         return res.status(400).json({
           success: false,
           message:
-            error.message
+            transferError.message
         });
       }
       /* =================================================
@@ -3241,7 +3276,9 @@ app.post(
           .toString();
       const codeHash =
         crypto
-          .createHash("sha256")
+          .createHash(
+            "sha256"
+          )
           .update(
             verificationCode
           )
@@ -3272,7 +3309,8 @@ app.post(
               codeHash,
             expires_at:
               expiresAt,
-            attempts: 0
+            attempts:
+              0
           })
           .select()
           .single();
@@ -3281,9 +3319,9 @@ app.post(
           "TRANSFER VERIFICATION CREATE ERROR:",
           verificationError
         );
-        // Remove the pending transfer if
-        // the verification record could not
-        // be created.
+        /* Remove pending transfer
+           if verification could
+           not be created. */
         await supabase
           .from("transfers")
           .delete()
@@ -3304,7 +3342,8 @@ app.post(
       /* =================================================
          SEND OTP EMAIL
          
-         DISABLED FOR NOW
+         Currently disabled because:
+         SEND_TRANSFER_OTP_EMAIL = false
       ================================================= */
       if (
         SEND_TRANSFER_OTP_EMAIL
@@ -3381,17 +3420,26 @@ app.post(
           currency:
             transfer.currency,
           status:
-            transfer.status
+            transfer.status,
+          recipient: {
+            account_number:
+              recipientAccountNumber,
+            name:
+              recipient.name,
+            bank:
+              recipient.bank
+          }
         },
         verification: {
-          required: true,
+          required:
+            true,
           expires_at:
             expiresAt
         }
       });
     } catch (error) {
       console.error(
-        "TRANSFER CREATE ERROR:",
+        "TRANSFER CREATE EXCEPTION:",
         error
       );
       return res.status(500).json({
