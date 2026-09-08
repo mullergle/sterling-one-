@@ -641,6 +641,86 @@ async function authenticateAdmin(
 }
 
 /* =====================================================
+   ADMIN — SUSPEND / ACTIVATE USER ACCOUNT
+===================================================== */
+app.patch(
+  "/api/admin/users/:userId/account-status",
+  authenticateAdmin,
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { status } = req.body || {};
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          message: "User ID is required"
+        });
+      }
+      if (
+        status !== "active" &&
+        status !== "suspended"
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Status must be active or suspended"
+        });
+      }
+      const {
+        data: account,
+        error: accountError
+      } = await supabase
+        .from("accounts")
+        .update({
+          status: status
+        })
+        .eq("user_id", userId)
+        .eq("account_type", "checking")
+        .select("id, user_id, account_number, account_type, status")
+        .maybeSingle();
+      if (accountError) {
+        console.error(
+          "ACCOUNT STATUS UPDATE ERROR:",
+          accountError
+        );
+        return res.status(500).json({
+          success: false,
+          message:
+            "Unable to update account status",
+          error:
+            accountError.message
+        });
+      }
+      if (!account) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "Checking account not found"
+        });
+      }
+      return res.status(200).json({
+        success: true,
+        message:
+          status === "suspended"
+            ? "User account suspended successfully"
+            : "User account activated successfully",
+        account: account
+      });
+    } catch (error) {
+      console.error(
+        "ACCOUNT STATUS UPDATE EXCEPTION:",
+        error
+      );
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to update account status"
+      });
+    }
+  }
+);
+
+/* =====================================================
    CUSTOMER SUPPORT CHAT
    CURRENT SUPPORT SYSTEM
 ===================================================== */
