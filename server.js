@@ -3686,7 +3686,13 @@ app.post(
           verification.code_hash,
           "utf8"
         );
-      const codeMatches = true;
+      const codeMatches =
+  submittedBuffer.length ===
+    storedBuffer.length &&
+  crypto.timingSafeEqual(
+    submittedBuffer,
+    storedBuffer
+);
       /* =================================================
          INCORRECT CODE
       ================================================= */
