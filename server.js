@@ -3383,7 +3383,7 @@ app.post(
           } =
             await resend.emails.send({
               from:
-                "Sterling One Bank <onboarding@resend.dev>",
+                 "Sterling One Bank <no-reply@sterlingonebank.sbs>",
               to:
                 customerEmail,
               subject:
