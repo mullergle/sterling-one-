@@ -3843,7 +3843,7 @@ if (
           .update({
   status: "processing"
 })
-          })
+          
           .eq(
             "id",
             transfer_id
