@@ -3841,8 +3841,8 @@ if (
         await supabase
           .from("transfers")
           .update({
-            status:
-              "verified"
+  status: "processing"
+})
           })
           .eq(
             "id",
