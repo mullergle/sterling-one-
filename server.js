@@ -1152,20 +1152,7 @@ app.post("/api/auth/register", async (req, res) => {
       console.error("PRIVACY CONSENT EXCEPTION:", error);
     }
 
-    try {
-      const { error } = await supabase
-        .from("notifications")
-        .insert({
-          user_id: createdUserId,
-          title: "Welcome to Sterling One Bank",
-          message:
-            "Your Sterling One Bank account has been created successfully.",
-          type: "account"
-        });
-      if (error) console.error("WELCOME NOTIFICATION ERROR:", error);
-    } catch (error) {
-      console.error("WELCOME NOTIFICATION EXCEPTION:", error);
-    }
+    
 
     return res.status(201).json({
       success: true,
