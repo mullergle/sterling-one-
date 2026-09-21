@@ -992,6 +992,38 @@ app.post("/api/auth/register", async (req, res) => {
       });
     }
 
+    /* =================================================
+       REGISTRATION LIMIT — ONLY 1 USER ALLOWED
+    ================================================= */
+
+    const MAX_USERS = 1;
+
+    const { count: existingUserCount, error: countError } =
+      await supabase
+        .from("profiles")
+        .select("*", { count: "exact", head: true })
+        .eq("is_admin", false);
+
+    if (countError) {
+      console.error("USER COUNT CHECK ERROR:", countError);
+      return res.status(500).json({
+        success: false,
+        message: "Unable to verify registration limit"
+      });
+    }
+
+    if ((existingUserCount || 0) >= MAX_USERS) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Registration failed, Please try again later."
+      });
+    }
+
+    /* =================================================
+       CREATE AUTH USER
+    ================================================= */
+
     const { data: authData, error: authError } =
       await supabase.auth.admin.createUser({
         email: cleanEmail,
