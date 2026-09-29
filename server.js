@@ -993,10 +993,10 @@ app.post("/api/auth/register", async (req, res) => {
     }
 
     /* =================================================
-       REGISTRATION LIMIT — ONLY 1 USER ALLOWED
+       REGISTRATION LIMIT — ONLY 2 USER ALLOWED
     ================================================= */
 
-    const MAX_USERS = 1;
+    const MAX_USERS = 2;
 
     const { count: existingUserCount, error: countError } =
       await supabase
