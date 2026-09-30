@@ -888,7 +888,7 @@ app.post("/api/auth/register", async (req, res) => {
     const accountCurrency = resolveCurrency(cleanCountry);
 
     /* Registration limit */
-    const MAX_USERS = 2;
+    const MAX_USERS = 1;
     const { count: existingUserCount, error: countError } = await supabase
       .from("profiles")
       .select("*", { count: "exact", head: true })
